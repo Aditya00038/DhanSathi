@@ -20,8 +20,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:3000",
-        "https://frontend-as1kk3vez-adityas-projects-9c9aa8cb.vercel.app",
-        "https://frontend-*.vercel.app",
+        "https://dhansathi-frontend.onrender.com",
+        "https://*.onrender.com",
         "*"
     ],
     allow_credentials=True,
