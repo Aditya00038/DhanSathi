@@ -1,0 +1,16 @@
+{
+  "name": "DhanSathi",
+  "short_name": "DhanSathi",
+  "description": "Your Personal AI-Powered Financial Companion",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#14b8a6",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

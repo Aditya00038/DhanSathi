@@ -1,0 +1,273 @@
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import Navbar from '../components/Navbar'
+import { useAuth } from '../App'
+import { 
+  TrendingUp, 
+  TrendingDown, 
+  Target, 
+  Plus,
+  Activity,
+  Smile,
+  Meh,
+  ChevronRight
+} from 'lucide-react'
+
+export default function Dashboard() {
+  const { user } = useAuth()
+  const [currentDate] = useState(new Date())
+
+  // Demo data - in production, this would come from API
+  const [dashboardData] = useState({
+    financialHealthScore: 10.0,
+    overallHealth: 100,
+    savingsRate: 99.0,
+    expenseRatio: 1.0,
+    totalIncome: 400000,
+    totalExpenses: 4500,
+    goals: [
+      {
+        id: 1,
+        name: 'Vacation',
+        current: 4000,
+        target: 10000,
+        daysLeft: 303,
+        progress: 40,
+      }
+    ],
+    recentTransactions: [
+      { id: 1, description: 'Salary Credit', amount: 400000, type: 'income', category: 'salary', date: '2025-11-30' },
+      { id: 2, description: 'Grocery Shopping', amount: -2500, type: 'expense', category: 'food', date: '2025-11-29' },
+      { id: 3, description: 'Electric Bill', amount: -1200, type: 'expense', category: 'utilities', date: '2025-11-28' },
+    ]
+  })
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(Math.abs(amount))
+  }
+
+  const formatDate = (date) => {
+    return new Date(date).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+      
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Welcome Section */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">
+              Welcome back, <span className="text-orange-500">{user?.full_name || 'User'}</span>
+            </h1>
+            <h2 className="text-xl text-gray-700 mt-1">Your Current Balance</h2>
+            <p className="text-gray-500 text-sm mt-1">
+              Your financial overview for {formatDate(currentDate)}
+            </p>
+          </div>
+          <div className="mt-4 md:mt-0 flex items-center gap-2 px-4 py-2 bg-green-50 rounded-full">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span className="text-green-700 font-medium text-sm">Live Data</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Main Cards */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Financial Health Score Card */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                    <Activity className="w-6 h-6 text-green-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Financial Health Score</h3>
+                    <p className="text-sm text-gray-500">Your overall financial wellness</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-bold text-gray-900">
+                    {dashboardData.financialHealthScore}<span className="text-lg text-gray-400">/10</span>
+                  </div>
+                  <span className="text-green-600 text-sm font-medium flex items-center justify-end gap-1">
+                    <TrendingUp size={14} />
+                    Excellent
+                  </span>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="mt-6">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-gray-600">Overall Health</span>
+                  <span className="font-medium text-green-600">{dashboardData.overallHealth}%</span>
+                </div>
+                <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full transition-all duration-1000"
+                    style={{ width: `${dashboardData.overallHealth}%` }}
+                  ></div>
+                </div>
+              </div>
+
+              {/* Stats Row */}
+              <div className="grid grid-cols-2 gap-4 mt-6">
+                <div className="bg-green-50 rounded-xl p-4 text-center">
+                  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                    <Smile className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div className="text-2xl font-bold text-green-600">+{dashboardData.savingsRate}%</div>
+                  <p className="text-sm text-gray-600">Savings Rate</p>
+                </div>
+                <div className="bg-orange-50 rounded-xl p-4 text-center">
+                  <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                    <Meh className="w-5 h-5 text-orange-600" />
+                  </div>
+                  <div className="text-2xl font-bold text-orange-600">{dashboardData.expenseRatio}%</div>
+                  <p className="text-sm text-gray-600">Expense Ratio</p>
+                </div>
+              </div>
+
+              {/* Financial Summary Accordion */}
+              <div className="mt-6 border-t pt-4">
+                <button className="w-full flex items-center justify-between text-gray-700 hover:text-gray-900">
+                  <span className="font-medium">Financial Summary</span>
+                  <ChevronRight size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Stats */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-gray-600 text-sm">Total Income</span>
+                  <TrendingUp className="w-5 h-5 text-green-500" />
+                </div>
+                <div className="text-2xl font-bold text-gray-900">{formatCurrency(dashboardData.totalIncome)}</div>
+                <p className="text-xs text-gray-500 mt-1">This month</p>
+              </div>
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-gray-600 text-sm">Total Expenses</span>
+                  <TrendingDown className="w-5 h-5 text-red-500" />
+                </div>
+                <div className="text-2xl font-bold text-gray-900">{formatCurrency(dashboardData.totalExpenses)}</div>
+                <p className="text-xs text-gray-500 mt-1">This month</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column - Sidebar */}
+          <div className="space-y-6">
+            {/* Financial Coach Card */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                  <span className="text-lg">😊</span>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-orange-600">Financial Coach</h4>
+                  <p className="text-xs text-gray-500">Streak: <span className="text-orange-500 font-medium">0 days</span></p>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600">
+                Great job! Your finances are looking healthy!
+              </p>
+            </div>
+
+            {/* Goal Progress Card */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Target className="w-5 h-5 text-orange-500" />
+                  <h4 className="font-semibold text-orange-600">Goal Progress</h4>
+                </div>
+                <Link to="/goals" className="text-sm text-orange-600 hover:text-orange-700 font-medium flex items-center gap-1">
+                  View All
+                  <ChevronRight size={16} />
+                </Link>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">Your financial targets</p>
+
+              {dashboardData.goals.map(goal => (
+                <div key={goal.id} className="border rounded-xl p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="text-sm text-gray-500">{formatCurrency(goal.current)} / {formatCurrency(goal.target)}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">→ {goal.progress}%</span>
+                      <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
+                    </div>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
+                    <div 
+                      className="h-full bg-gradient-to-r from-orange-500 to-orange-400 rounded-full"
+                      style={{ width: `${goal.progress}%` }}
+                    ></div>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>📅 {goal.daysLeft} days left</span>
+                    <span className="text-green-600 font-medium">Good progress</span>
+                  </div>
+                </div>
+              ))}
+
+              <button className="w-full mt-4 flex items-center justify-center gap-2 text-gray-600 hover:text-gray-900 py-2 border border-dashed border-gray-300 rounded-lg hover:border-gray-400 transition-colors">
+                <Plus size={16} />
+                Add New Goal
+              </button>
+            </div>
+
+            {/* Recent Activity */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h4 className="font-semibold text-gray-900 mb-4">Recent Transactions</h4>
+              <div className="space-y-3">
+                {dashboardData.recentTransactions.slice(0, 3).map(tx => (
+                  <div key={tx.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        tx.type === 'income' ? 'bg-green-100' : 'bg-red-100'
+                      }`}>
+                        {tx.type === 'income' ? (
+                          <TrendingUp className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <TrendingDown className="w-4 h-4 text-red-600" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{tx.description}</p>
+                        <p className="text-xs text-gray-500">{tx.category}</p>
+                      </div>
+                    </div>
+                    <span className={`font-semibold ${tx.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                      {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <Link 
+                to="/transactions" 
+                className="block mt-4 text-center text-sm text-orange-600 hover:text-orange-700 font-medium"
+              >
+                View All Transactions →
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  )
+}
