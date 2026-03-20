@@ -127,7 +127,7 @@ export default function CreateNormalGoalForm() {
                     <Button
                       variant={"outline"}
                       className={cn(
-                        "w-full justify-start text-left font-normal",
+                        "h-11 w-full justify-start rounded-xl border-border/60 bg-background text-left font-normal",
                         !field.value && "text-muted-foreground"
                       )}
                     >
@@ -136,7 +136,7 @@ export default function CreateNormalGoalForm() {
                     </Button>
                   </FormControl>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
+                <PopoverContent className="w-auto rounded-xl border border-border/60 p-2 shadow-lg" align="start">
                   <Calendar
                     mode="single"
                     selected={field.value}

@@ -19,12 +19,12 @@ import { Badge } from '@/components/ui/badge';
 import { TrendingUp, Target, GitCommit, Wallet, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getGoalsAndDeposits, getSavedSmsTransactions } from '@/lib/local-store';
+import { getAllNormalGoals } from '@/lib/normal-goal-store';
 import { getGoalOnChainState } from '@/lib/blockchain';
-import { microAlgosToAlgos, formatCurrency } from '@/lib/utils';
+import { microAlgosToAlgos, formatCurrency, toDate } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import AuthGuard from '@/components/auth/AuthGuard';
 import Navbar from '@/components/layout/Navbar';
-import { toDate } from '@/lib/utils';
 import type { SavedSmsTransaction } from '@/lib/types';
 
 type DepositRecord = {
@@ -49,6 +49,15 @@ type GoalAnalytics = {
   progressPct: number;
   deposits: DepositRecord[];
   onChainOk: boolean;
+};
+
+type SpendingTransaction = {
+  id: string;
+  amount: number;
+  date: string;
+  merchant: string;
+  type: 'debit' | 'credit';
+  source: 'sms' | 'saving-goal';
 };
 
 const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6'];
@@ -110,16 +119,17 @@ function normalizeLegacyMerchantLabel(label: string): string {
   if (/meesho/.test(lower)) return 'Meesho (Groceries)';
   if (/blinkit/.test(lower)) return 'Blinkit (Groceries)';
   if (/zepto/.test(lower)) return 'Zepto (Groceries)';
-
   return label;
 }
 
 function AnalyticsPage() {
   const isMobile = useIsMobile();
   const { user } = useAuth();
+
   const [loading, setLoading] = useState(true);
   const [goals, setGoals] = useState<GoalAnalytics[]>([]);
   const [selectedGoalId, setSelectedGoalId] = useState<string>('');
+
   const [selectedSmsCategory, setSelectedSmsCategory] = useState<string>('all');
   const [selectedSmsDateRange, setSelectedSmsDateRange] = useState<string>('all');
 
@@ -177,30 +187,22 @@ function AnalyticsPage() {
       );
 
       if (!mounted) return;
-
       setGoals(resolved);
       setSelectedGoalId((prev) => prev || resolved[0]?.id || '');
       setLoading(false);
     };
 
     load();
-
     return () => {
       mounted = false;
     };
   }, [user?.uid]);
 
-  const selectedGoal = useMemo(
-    () => goals.find((g) => g.id === selectedGoalId),
-    [goals, selectedGoalId]
-  );
+  const selectedGoal = useMemo(() => goals.find((g) => g.id === selectedGoalId), [goals, selectedGoalId]);
 
   const totalSaved = useMemo(() => goals.reduce((sum, g) => sum + g.savedAlgo, 0), [goals]);
   const totalTarget = useMemo(() => goals.reduce((sum, g) => sum + g.targetAlgo, 0), [goals]);
-  const totalDepositCount = useMemo(
-    () => goals.reduce((sum, g) => sum + g.deposits.length, 0),
-    [goals]
-  );
+  const totalDepositCount = useMemo(() => goals.reduce((sum, g) => sum + g.deposits.length, 0), [goals]);
   const avgProgress = totalTarget > 0 ? (totalSaved / totalTarget) * 100 : 0;
 
   const pieChartData = useMemo(
@@ -211,56 +213,86 @@ function AnalyticsPage() {
   const monthlySavingsData = useMemo(() => buildMonthlySavings(goals), [goals]);
   const goalDepositBars = useMemo(() => buildGoalDepositBars(selectedGoal), [selectedGoal]);
   const pieOuterRadius = isMobile ? 78 : 110;
+
   const smsTransactions: SavedSmsTransaction[] = useMemo(
     () => (user?.uid ? getSavedSmsTransactions(user.uid) : []),
     [user?.uid]
   );
 
-  const debitSmsTransactions = useMemo(
+  const smsSpendingTransactions: SpendingTransaction[] = useMemo(
     () => smsTransactions
       .filter((tx) => tx.type === 'debit' && tx.amount > 0)
       .map((tx) => ({
-        ...tx,
+        id: tx.id,
+        amount: tx.amount,
+        date: tx.date,
         merchant: normalizeLegacyMerchantLabel(tx.merchant),
+        type: 'debit' as const,
+        source: 'sms' as const,
       })),
     [smsTransactions]
   );
 
-  const smsCategories = useMemo(() => {
+  const savingsGoalSpendingTransactions: SpendingTransaction[] = useMemo(() => {
+    if (!user?.uid) return [];
+    const normalGoals = getAllNormalGoals(user.uid);
+
+    return normalGoals.flatMap((goal) =>
+      (goal.transactions || [])
+        .filter((tx) => tx.type === 'deposit' && tx.amount > 0)
+        .map((tx) => ({
+          id: `sg_${goal.id}_${tx.id}`,
+          amount: tx.amount,
+          date: tx.timestamp,
+          merchant: `${goal.name} (Savings Goal)`,
+          type: 'debit' as const,
+          source: 'saving-goal' as const,
+        }))
+    );
+  }, [user?.uid]);
+
+  const allDebitSpendingTransactions = useMemo(
+    () => [...smsSpendingTransactions, ...savingsGoalSpendingTransactions]
+      .filter((tx) => tx.type === 'debit' && tx.amount > 0)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [smsSpendingTransactions, savingsGoalSpendingTransactions]
+  );
+
+  const spendingCategories = useMemo(() => {
     const categories = new Set<string>();
-    debitSmsTransactions.forEach((tx) => {
+    allDebitSpendingTransactions.forEach((tx) => {
       categories.add(parseMerchantLabel(tx.merchant).category);
     });
     return ['all', ...Array.from(categories).sort((a, b) => a.localeCompare(b))];
-  }, [debitSmsTransactions]);
+  }, [allDebitSpendingTransactions]);
 
-  const dateRangeFilteredSmsTransactions = useMemo(() => {
-    if (selectedSmsDateRange === 'all') return debitSmsTransactions;
+  const dateRangeFilteredTransactions = useMemo(() => {
+    if (selectedSmsDateRange === 'all') return allDebitSpendingTransactions;
+
+    const days = Number(selectedSmsDateRange);
+    if (!Number.isFinite(days) || days <= 0) return allDebitSpendingTransactions;
 
     const now = new Date();
-    const days = Number(selectedSmsDateRange);
-    if (!Number.isFinite(days) || days <= 0) return debitSmsTransactions;
-
     const minDate = new Date(now);
     minDate.setDate(now.getDate() - days);
 
-    return debitSmsTransactions.filter((tx) => {
+    return allDebitSpendingTransactions.filter((tx) => {
       const d = new Date(tx.date);
-      if (Number.isNaN(d.getTime())) return false;
-      return d >= minDate;
+      return !Number.isNaN(d.getTime()) && d >= minDate;
     });
-  }, [debitSmsTransactions, selectedSmsDateRange]);
+  }, [allDebitSpendingTransactions, selectedSmsDateRange]);
 
-  const filteredSmsTransactions = useMemo(() => {
-    if (selectedSmsCategory === 'all') return dateRangeFilteredSmsTransactions;
-    return dateRangeFilteredSmsTransactions.filter(
+  const filteredSpendingTransactions = useMemo(() => {
+    if (selectedSmsCategory === 'all') return dateRangeFilteredTransactions;
+    return dateRangeFilteredTransactions.filter(
       (tx) => parseMerchantLabel(tx.merchant).category.toLowerCase() === selectedSmsCategory.toLowerCase()
     );
-  }, [dateRangeFilteredSmsTransactions, selectedSmsCategory]);
+  }, [dateRangeFilteredTransactions, selectedSmsCategory]);
 
-  const smsSpendingByMerchant = useMemo(() => {
+  const spendingByMerchant = useMemo(() => {
     const map = new Map<string, { amount: number; lastDate: string }>();
-    filteredSmsTransactions.forEach((tx) => {
+
+    filteredSpendingTransactions.forEach((tx) => {
       const prev = map.get(tx.merchant);
       if (!prev) {
         map.set(tx.merchant, { amount: tx.amount, lastDate: tx.date });
@@ -276,11 +308,11 @@ function AnalyticsPage() {
       .map(([merchant, value]) => ({ merchant, amount: value.amount, lastDate: value.lastDate }))
       .sort((a, b) => b.amount - a.amount || new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime())
       .slice(0, 8);
-  }, [filteredSmsTransactions]);
+  }, [filteredSpendingTransactions]);
 
-  const smsSpendingByCategory = useMemo(() => {
+  const spendingByCategory = useMemo(() => {
     const map = new Map<string, number>();
-    debitSmsTransactions.forEach((tx) => {
+    allDebitSpendingTransactions.forEach((tx) => {
       const { category } = parseMerchantLabel(tx.merchant);
       map.set(category, (map.get(category) || 0) + tx.amount);
     });
@@ -288,16 +320,16 @@ function AnalyticsPage() {
     return Array.from(map.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [debitSmsTransactions]);
+  }, [allDebitSpendingTransactions]);
 
-  const smsTotalSpent = useMemo(
-    () => filteredSmsTransactions.reduce((sum, tx) => sum + tx.amount, 0),
-    [filteredSmsTransactions]
+  const totalSpending = useMemo(
+    () => filteredSpendingTransactions.reduce((sum, tx) => sum + tx.amount, 0),
+    [filteredSpendingTransactions]
   );
 
-  const smsMonthlyFiltered = useMemo(() => {
+  const monthlySpendingFiltered = useMemo(() => {
     const map = new Map<string, number>();
-    filteredSmsTransactions.forEach((tx) => {
+    filteredSpendingTransactions.forEach((tx) => {
       const month = (tx.date || '').slice(0, 7) || 'Unknown';
       map.set(month, (map.get(month) || 0) + tx.amount);
     });
@@ -305,11 +337,11 @@ function AnalyticsPage() {
     return Array.from(map.entries())
       .map(([month, amount]) => ({ month, amount }))
       .sort((a, b) => a.month.localeCompare(b.month));
-  }, [filteredSmsTransactions]);
+  }, [filteredSpendingTransactions]);
 
-  const smsPaymentHistory = useMemo(
-    () => [...filteredSmsTransactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 25),
-    [filteredSmsTransactions]
+  const paymentHistory = useMemo(
+    () => [...filteredSpendingTransactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 25),
+    [filteredSpendingTransactions]
   );
 
   return (
@@ -489,15 +521,15 @@ function AnalyticsPage() {
               <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
                 <Card className="xl:col-span-3">
                   <CardHeader>
-                    <CardTitle className="text-base md:text-xl">SMS Spending Insights</CardTitle>
-                    <CardDescription className="text-xs md:text-sm">Company/brand and category from saved SMS transactions.</CardDescription>
+                    <CardTitle className="text-base md:text-xl">Spending Insights</CardTitle>
+                    <CardDescription className="text-xs md:text-sm">Includes saved SMS spends and savings goal deposits.</CardDescription>
                     <div className="pt-2 flex flex-col sm:flex-row gap-2">
                       <Select value={selectedSmsCategory} onValueChange={setSelectedSmsCategory}>
                         <SelectTrigger className="w-full sm:w-[220px]">
                           <SelectValue placeholder="Filter by category" />
                         </SelectTrigger>
                         <SelectContent>
-                          {smsCategories.map((cat) => (
+                          {spendingCategories.map((cat) => (
                             <SelectItem key={cat} value={cat}>
                               {cat === 'all' ? 'All Categories' : cat}
                             </SelectItem>
@@ -519,13 +551,15 @@ function AnalyticsPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    {smsSpendingByMerchant.length > 0 ? (
+                    {spendingByMerchant.length > 0 ? (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between rounded-md border p-3">
-                          <span className="text-sm text-muted-foreground">Total SMS Spend ({selectedSmsCategory === 'all' ? 'All' : selectedSmsCategory}, {selectedSmsDateRange === 'all' ? 'All Time' : `Last ${selectedSmsDateRange} Days`})</span>
-                          <span className="font-semibold">{formatInr(smsTotalSpent)}</span>
+                          <span className="text-sm text-muted-foreground">
+                            Total Spend ({selectedSmsCategory === 'all' ? 'All' : selectedSmsCategory}, {selectedSmsDateRange === 'all' ? 'All Time' : `Last ${selectedSmsDateRange} Days`})
+                          </span>
+                          <span className="font-semibold">{formatInr(totalSpending)}</span>
                         </div>
-                        {smsSpendingByMerchant.map((item, idx) => {
+                        {spendingByMerchant.map((item, idx) => {
                           const { brand, category } = parseMerchantLabel(item.merchant);
                           return (
                             <div key={`${item.merchant}-${idx}`} className="flex items-center justify-between rounded-md border p-3">
@@ -540,7 +574,7 @@ function AnalyticsPage() {
                       </div>
                     ) : (
                       <div className="py-8 text-center text-muted-foreground">
-                        Save SMS parsed transactions to view spending insights.
+                        Save SMS parsed transactions or deposit into savings goals to view spending insights.
                       </div>
                     )}
                   </CardContent>
@@ -552,11 +586,11 @@ function AnalyticsPage() {
                     <CardDescription className="text-xs md:text-sm">Category split from merchant labels.</CardDescription>
                   </CardHeader>
                   <CardContent className="h-[260px] sm:h-[300px] md:h-[320px] px-2 md:px-6">
-                    {smsSpendingByCategory.length > 0 ? (
+                    {spendingByCategory.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
-                            data={smsSpendingByCategory}
+                            data={spendingByCategory}
                             dataKey="value"
                             nameKey="name"
                             cx="50%"
@@ -564,7 +598,7 @@ function AnalyticsPage() {
                             outerRadius={pieOuterRadius}
                             label={!isMobile}
                           >
-                            {smsSpendingByCategory.map((_, idx) => (
+                            {spendingByCategory.map((_, idx) => (
                               <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
                             ))}
                           </Pie>
@@ -573,7 +607,7 @@ function AnalyticsPage() {
                       </ResponsiveContainer>
                     ) : (
                       <div className="h-full flex items-center justify-center text-muted-foreground">
-                        No SMS spending data yet.
+                        No spending data yet.
                       </div>
                     )}
                   </CardContent>
@@ -584,12 +618,12 @@ function AnalyticsPage() {
                 <Card className="xl:col-span-2">
                   <CardHeader>
                     <CardTitle className="text-base md:text-xl">Filtered Spend Graph (INR)</CardTitle>
-                    <CardDescription className="text-xs md:text-sm">Monthly spending for selected category.</CardDescription>
+                    <CardDescription className="text-xs md:text-sm">Monthly spending for selected category/date filter.</CardDescription>
                   </CardHeader>
                   <CardContent className="h-[250px] md:h-[290px] px-2 md:px-6">
-                    {smsMonthlyFiltered.length > 0 ? (
+                    {monthlySpendingFiltered.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={smsMonthlyFiltered} margin={{ top: 8, right: 6, left: -10, bottom: 0 }}>
+                        <BarChart data={monthlySpendingFiltered} margin={{ top: 8, right: 6, left: -10, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} />
                           <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={10} />
                           <YAxis tickLine={false} axisLine={false} fontSize={10} width={40} />
@@ -608,18 +642,20 @@ function AnalyticsPage() {
                 <Card className="xl:col-span-3">
                   <CardHeader>
                     <CardTitle className="text-base md:text-xl">Payment History</CardTitle>
-                    <CardDescription className="text-xs md:text-sm">Latest debit transactions for selected category.</CardDescription>
+                    <CardDescription className="text-xs md:text-sm">Latest debit transactions for selected filter.</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {smsPaymentHistory.length > 0 ? (
+                    {paymentHistory.length > 0 ? (
                       <div className="space-y-2">
-                        {smsPaymentHistory.map((tx) => {
+                        {paymentHistory.map((tx) => {
                           const { brand, category } = parseMerchantLabel(tx.merchant);
                           return (
                             <div key={tx.id} className="flex items-center justify-between rounded-md border p-3">
                               <div className="min-w-0">
                                 <p className="font-medium truncate">{brand} ({category})</p>
-                                <p className="text-xs text-muted-foreground">Done on {formatDisplayDate(tx.date)}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Done on {formatDisplayDate(tx.date)} · {tx.source === 'saving-goal' ? 'Savings Goal Deposit' : 'SMS'}
+                                </p>
                               </div>
                               <p className="font-semibold ml-3 text-red-500">{formatInr(tx.amount)}</p>
                             </div>

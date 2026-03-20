@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { CheckCircle2, Circle, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, TrendingUp, User, Mail, Lock, Phone } from 'lucide-react';
 
 function getPasswordChecks(password: string) {
   return {
@@ -64,11 +64,12 @@ export default function Register() {
   const doPasswordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   const phoneDigits = normalizeIndianPhone(phone);
   const isPhoneValid = phoneDigits.length === 10;
+  const isPasswordValid = password.length >= 6;
   const canSubmit =
     name.trim().length > 1 &&
     email.trim().length > 0 &&
     isPhoneValid &&
-    Object.values(passwordChecks).every(Boolean) &&
+    isPasswordValid &&
     doPasswordsMatch;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -80,8 +81,8 @@ export default function Register() {
       return;
     }
 
-    if (!Object.values(passwordChecks).every(Boolean)) {
-      setError('Please create a stronger password that satisfies all requirements.');
+    if (!isPasswordValid) {
+      setError('Password must be at least 6 characters long.');
       return;
     }
 
@@ -117,20 +118,15 @@ export default function Register() {
     }
   };
 
-  const passwordRules = [
-    { label: 'At least 8 characters', valid: passwordChecks.minLength },
-    { label: 'One uppercase letter', valid: passwordChecks.hasUpper },
-    { label: 'One lowercase letter', valid: passwordChecks.hasLower },
-    { label: 'One number', valid: passwordChecks.hasNumber },
-    { label: 'One special character', valid: passwordChecks.hasSymbol },
-  ];
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-amber-50 px-4 py-10 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950">
-      <div className="w-full max-w-md space-y-6 rounded-2xl border border-emerald-100 bg-white/95 p-8 shadow-xl backdrop-blur dark:border-gray-700 dark:bg-gray-900/90">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+      <div className="w-full max-w-md space-y-6 rounded-2xl border border-border/60 bg-card/60 p-6 shadow-lg backdrop-blur-sm md:p-7">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Create your account</h1>
-          <p className="mt-1 text-gray-600 dark:text-gray-300">Start your journey with DhanSathi</p>
+          <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500 text-white">
+            <TrendingUp className="h-5 w-5" />
+          </div>
+          <h1 className="text-4xl font-bold tracking-tight">Create your account</h1>
+          <p className="mt-2 text-lg text-muted-foreground">Start your journey with DhanSathi</p>
         </div>
 
         {error && (
@@ -140,125 +136,130 @@ export default function Register() {
           </Alert>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Full Name</label>
-            <Input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter your full name"
-              required
-            />
+            <label className="mb-2 block text-sm font-medium">Full Name</label>
+            <div className="relative">
+              <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                className="h-11 rounded-xl border-border/60 bg-background pl-10"
+                required
+              />
+            </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              required
-            />
+            <label className="mb-2 block text-sm font-medium">Email</label>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="h-11 rounded-xl border-border/60 bg-background pl-10"
+                required
+              />
+            </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Phone Number</label>
-            <Input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(normalizeIndianPhone(e.target.value))}
-              placeholder="10-digit mobile number"
-              inputMode="numeric"
-              pattern="[0-9]{10}"
-              maxLength={10}
-              required
-            />
-            <p className={`mt-1 text-xs ${isPhoneValid || phone.length === 0 ? 'text-gray-500 dark:text-gray-400' : 'text-red-600 dark:text-red-400'}`}>
+            <label className="mb-2 block text-sm font-medium">Phone Number</label>
+            <div className="relative">
+              <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(normalizeIndianPhone(e.target.value))}
+                placeholder="10-digit mobile number"
+                inputMode="numeric"
+                pattern="[0-9]{10}"
+                maxLength={10}
+                className="h-11 rounded-xl border-border/60 bg-background pl-10"
+                required
+              />
+            </div>
+            <p className={`mt-1 text-xs ${isPhoneValid || phone.length === 0 ? 'text-muted-foreground' : 'text-red-500'}`}>
               {isPhoneValid || phone.length === 0 ? 'Format: 10 digits (India).' : 'Phone number must be exactly 10 digits.'}
             </p>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
+            <label className="mb-2 block text-sm font-medium">Password</label>
             <div className="relative">
+              <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Create a secure password"
-                className="pr-10"
+                placeholder="At least 8 characters"
+                className="h-11 rounded-xl border-border/60 bg-background pl-10 pr-10"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((prev) => !prev)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
 
-            <div className="mt-3">
-              <div className="mb-1 flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+            <div className="mt-2">
+              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Password strength</span>
                 <span>{passwordScore.label}</span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className={`h-full transition-all duration-300 ${passwordScore.color}`}
                   style={{ width: `${(passwordScore.score / 5) * 100}%` }}
                 />
               </div>
             </div>
-
-            <div className="mt-3 grid grid-cols-1 gap-1.5 text-xs sm:grid-cols-2">
-              {passwordRules.map((rule) => (
-                <div key={rule.label} className={`flex items-center gap-1.5 ${rule.valid ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                  {rule.valid ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                  <span>{rule.label}</span>
-                </div>
-              ))}
-            </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Confirm Password</label>
+            <label className="mb-2 block text-sm font-medium">Confirm Password</label>
             <div className="relative">
+              <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Re-enter your password"
-                className="pr-10"
+                className="h-11 rounded-xl border-border/60 bg-background pl-10 pr-10"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword((prev) => !prev)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
                 aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
               >
                 {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
             {confirmPassword.length > 0 && (
-              <p className={`mt-1 text-xs ${doPasswordsMatch ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              <p className={`mt-1 text-xs ${doPasswordsMatch ? 'text-emerald-500' : 'text-red-500'}`}>
                 {doPasswordsMatch ? 'Passwords match.' : 'Passwords do not match.'}
               </p>
             )}
           </div>
 
-          <Button type="submit" className="w-full" disabled={!canSubmit || submitting}>
+          <Button type="submit" className="h-11 w-full rounded-xl bg-emerald-500 text-white hover:bg-emerald-600" disabled={!canSubmit || submitting}>
             {submitting ? 'Creating Account...' : 'Create Account'}
           </Button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link href="/login" className="font-medium text-emerald-700 hover:text-emerald-600 dark:text-emerald-400 dark:hover:text-emerald-300">
+          <Link href="/login" className="font-medium text-emerald-500 hover:text-emerald-400">
             Sign in
           </Link>
         </p>
