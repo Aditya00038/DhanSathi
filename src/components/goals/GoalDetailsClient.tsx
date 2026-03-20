@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { getAchievementCoachAdvice } from '@/ai/flows/ai-achievement-coach-flow';
 import { getGoalOnChainState, withdrawFromGoal, mintAchievementNFT } from '@/lib/blockchain';
-import { useWallet } from '@/hooks/useWallet';
+import { useWallet } from '@/contexts/WalletContext';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 import { calculateFinancialHealth } from '@/lib/financial-health';
@@ -52,10 +52,23 @@ export default function GoalDetailsClient({ goal: initialGoal }: GoalDetailsClie
   const [achievementNFT, setAchievementNFT] = useState<AchievementNFT | null>(null);
   const [isMintingNFT, setIsMintingNFT] = useState(false);
 
-  const { activeAddress, signTransactions } = useWallet();
+  const { activeAddress, signTransactions, connectWallet, isConnecting } = useWallet();
   const { user } = useAuth();
   const { toast } = useToast();
   const { updateBalance } = useBankBalance();
+
+  const handleConnectWallet = useCallback(async () => {
+    try {
+      await connectWallet();
+      toast({ title: 'Wallet Connected', description: 'Pera wallet connected successfully.' });
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: 'Connection Failed',
+        description: 'Could not connect Pera wallet. Please try again.',
+      });
+    }
+  }, [connectWallet, toast]);
 
   const fetchOnChainData = useCallback(async () => {
     if (!user) return;
@@ -309,7 +322,7 @@ export default function GoalDetailsClient({ goal: initialGoal }: GoalDetailsClie
                   </div>
               </div>
           </div>
-           {status !== 'completed' && <DepositDialog goalId={goal.id} goalName={goal.name} onDepositSuccess={fetchOnChainData} />}
+           {status !== 'completed' && <DepositDialog goalId={goal.id} goalName={goal.name} appId={goal.appId} onDepositSuccess={fetchOnChainData} />}
            
            {!canWithdraw && onChainGoal.balance > 0 && (
             <Card className="border-destructive/30 bg-destructive/5">
@@ -346,56 +359,63 @@ export default function GoalDetailsClient({ goal: initialGoal }: GoalDetailsClie
            )}
 
            {canWithdraw && onChainGoal.balance > 0 && (
-            <AlertDialog open={showWithdrawConfirm} onOpenChange={setShowWithdrawConfirm}>
-              <AlertDialogTrigger asChild>
-                <Button disabled={isWithdrawing || !activeAddress} className="w-full" variant="outline">
-                  {isWithdrawing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wallet className="mr-2" />}
-                  {isWithdrawing ? "Withdrawing..." : `Withdraw ${formatCurrency(microAlgosToAlgos(onChainGoal.balance))}`}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                      <ShieldAlert className="h-5 w-5" />
-                    </div>
-                    <AlertDialogTitle>Smart Contract Withdrawal</AlertDialogTitle>
-                  </div>
-                  <AlertDialogDescription asChild>
-                    <div className="space-y-3">
-                      <p>
-                        You are about to withdraw <strong>{formatCurrency(microAlgosToAlgos(onChainGoal.balance))}</strong> from your smart contract vault.
-                      </p>
-                      <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 p-3 border border-amber-200 dark:border-amber-800">
-                        <p className="text-sm text-amber-800 dark:text-amber-200 font-medium">
-                          ⚠️ Please confirm you understand:
-                        </p>
-                        <ul className="text-sm text-amber-700 dark:text-amber-300 list-disc list-inside mt-1 space-y-1">
-                          <li>This action will release all locked funds from the smart contract</li>
-                          <li>The smart contract vault cannot be reversed once withdrawn</li>
-                          <li>Your goal progress will be reset to zero</li>
-                        </ul>
+            !activeAddress ? (
+              <Button onClick={handleConnectWallet} className="w-full" variant="outline" disabled={isConnecting}>
+                <Wallet className="mr-2 h-4 w-4" />
+                {isConnecting ? 'Connecting Wallet...' : 'Connect Pera Wallet to Withdraw'}
+              </Button>
+            ) : (
+              <AlertDialog open={showWithdrawConfirm} onOpenChange={setShowWithdrawConfirm}>
+                <AlertDialogTrigger asChild>
+                  <Button disabled={isWithdrawing} className="w-full" variant="outline">
+                    {isWithdrawing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wallet className="mr-2" />}
+                    {isWithdrawing ? "Withdrawing..." : `Withdraw ${formatCurrency(microAlgosToAlgos(onChainGoal.balance))}`}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                        <ShieldAlert className="h-5 w-5" />
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        Are you sure you want to proceed with the withdrawal?
-                      </p>
+                      <AlertDialogTitle>Smart Contract Withdrawal</AlertDialogTitle>
                     </div>
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => {
-                      setShowWithdrawConfirm(false);
-                      handleWithdraw();
-                    }}
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    Yes, Withdraw Funds
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                    <AlertDialogDescription asChild>
+                      <div className="space-y-3">
+                        <p>
+                          You are about to withdraw <strong>{formatCurrency(microAlgosToAlgos(onChainGoal.balance))}</strong> from your smart contract vault.
+                        </p>
+                        <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 p-3 border border-amber-200 dark:border-amber-800">
+                          <p className="text-sm text-amber-800 dark:text-amber-200 font-medium">
+                            ⚠️ Please confirm you understand:
+                          </p>
+                          <ul className="text-sm text-amber-700 dark:text-amber-300 list-disc list-inside mt-1 space-y-1">
+                            <li>This action will release all locked funds from the smart contract</li>
+                            <li>The smart contract vault cannot be reversed once withdrawn</li>
+                            <li>Your goal progress will be reset to zero</li>
+                          </ul>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Are you sure you want to proceed with the withdrawal?
+                        </p>
+                      </div>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        setShowWithdrawConfirm(false);
+                        handleWithdraw();
+                      }}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Yes, Withdraw Funds
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )
            )}
         </CardContent>
       </Card>
@@ -588,12 +608,16 @@ export default function GoalDetailsClient({ goal: initialGoal }: GoalDetailsClie
                       Goal completed! Mint a unique ARC-3 compliant NFT as permanent on-chain proof of your achievement. 🎉
                     </p>
                     <Button
-                      onClick={handleMintNFT}
-                      disabled={isMintingNFT || !activeAddress}
+                      onClick={activeAddress ? handleMintNFT : handleConnectWallet}
+                      disabled={isMintingNFT || isConnecting}
                       className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
                     >
                       {isMintingNFT ? (
                         <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Minting NFT...</>
+                      ) : isConnecting ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connecting Wallet...</>
+                      ) : !activeAddress ? (
+                        <><Wallet className="mr-2 h-4 w-4" /> Connect Pera Wallet</>
                       ) : (
                         <><Sparkles className="mr-2 h-4 w-4" /> Mint Achievement NFT</>
                       )}

@@ -6,6 +6,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
 import ChatBot from "@/components/chat/ChatBot";
 import InstallPrompt from "@/components/pwa/InstallPrompt";
+import DevServiceWorkerCleanup from "@/components/pwa/DevServiceWorkerCleanup";
 import FloatingLanguageSelector from "@/components/layout/FloatingLanguageSelector";
 import Script from "next/script";
 
@@ -15,6 +16,11 @@ export const metadata: Metadata = {
   title: "DhanSathi - AI-Powered Financial Management",
   description: "Track your finances with AI-powered insights and secure your savings on the Algorand blockchain.",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/icons/DhanSathi.png",
+    shortcut: "/icons/DhanSathi.png",
+    apple: "/icons/DhanSathi.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -48,7 +54,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         {/* PWA Meta Tags */}
-        <link rel="apple-touch-icon" href="/icons/icon-192x192.svg" />
+        <link rel="icon" href="/icons/DhanSathi.png" type="image/png" />
+        <link rel="shortcut icon" href="/icons/DhanSathi.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/icons/DhanSathi.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="mobile-web-app-capable" content="yes" />
         
@@ -77,6 +85,7 @@ export default function RootLayout({
           <AuthProvider>
             <WalletProvider>
               {children}
+              <DevServiceWorkerCleanup />
               <ChatBot />
               <FloatingLanguageSelector />
               <InstallPrompt />

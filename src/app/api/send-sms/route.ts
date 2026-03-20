@@ -4,48 +4,63 @@
 import { NextResponse } from 'next/server';
 import twilio from 'twilio';
 
-function getTwilioClient() {
+function getTwilioClientConfig() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
-  if (!accountSid || !authToken || !twilioPhoneNumber) {
-    // Important: do not throw at module load time, otherwise Next/Vercel build can fail.
-    // Return a structured error we can handle inside the endpoint.
-    const missing = [
-      !accountSid ? 'TWILIO_ACCOUNT_SID' : null,
-      !authToken ? 'TWILIO_AUTH_TOKEN' : null,
-      !twilioPhoneNumber ? 'TWILIO_PHONE_NUMBER' : null,
-    ].filter(Boolean);
-
-    throw new Error(`SMS service is not properly configured. Missing env: ${missing.join(', ')}`);
-  }
+  const missing = [
+    !accountSid ? 'TWILIO_ACCOUNT_SID' : null,
+    !authToken ? 'TWILIO_AUTH_TOKEN' : null,
+    !twilioPhoneNumber ? 'TWILIO_PHONE_NUMBER' : null,
+  ].filter(Boolean) as string[];
 
   return {
-    client: twilio(accountSid, authToken),
+    accountSid,
+    authToken,
     twilioPhoneNumber,
+    missing,
   };
 }
 
+function buildErrorResponse(message: string, status = 500, details?: Record<string, unknown>) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: message,
+      ...(details ? { details } : {}),
+    },
+    { status }
+  );
+}
+
 export async function POST(request: Request) {
-  let recipient;
+  let recipient = '';
   try {
-    const { message, recipient: reqRecipient } = await request.json();
+    const body = await request.json();
+    const message = typeof body?.message === 'string' ? body.message.trim() : '';
+    const reqRecipient = typeof body?.recipient === 'string' ? body.recipient.trim() : '';
     recipient = reqRecipient;
 
     if (!recipient || !message) {
-      return new Response('Recipient and message are required.', { status: 400 });
+      return buildErrorResponse('Recipient and message are required.', 400);
     }
 
-    let formattedRecipient = recipient.trim();
+    let formattedRecipient = recipient;
     if (!formattedRecipient.startsWith('+')) {
       formattedRecipient = `+91${formattedRecipient}`;
     }
 
-    const { client, twilioPhoneNumber } = getTwilioClient();
+    const { accountSid, authToken, twilioPhoneNumber, missing } = getTwilioClientConfig();
+
+    if (missing.length > 0) {
+      return buildErrorResponse('SMS service is not properly configured.', 503, { missingEnv: missing });
+    }
+
+    const client = twilio(accountSid!, authToken!);
     const messageResponse = await client.messages.create({
       body: message,
-      from: twilioPhoneNumber,
+      from: twilioPhoneNumber!,
       to: formattedRecipient,
     });
 
@@ -70,10 +85,12 @@ export async function POST(request: Request) {
 
     // Fallback for other Twilio errors
     if (error.code) {
-      return new Response(`Failed to send SMS: ${error.message}`, { status: error.status || 500 });
+      return buildErrorResponse(`Failed to send SMS: ${error.message}`, error.status || 500, {
+        code: error.code,
+      });
     }
 
     // Fallback for generic server errors
-    return new Response('An unexpected server error occurred while sending SMS.', { status: 500 });
+    return buildErrorResponse('An unexpected server error occurred while sending SMS.', 500);
   }
 }

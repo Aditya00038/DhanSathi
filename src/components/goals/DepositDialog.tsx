@@ -18,14 +18,14 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../ui/form";
 import { addDepositToGoal } from "@/lib/local-store";
-import { useBankBalance } from "@/hooks/useBankBalance";
 import { useAuth } from "@/contexts/AuthContext";
-
-declare const Razorpay: any;
+import { useWallet } from "@/contexts/WalletContext";
+import { depositToGoal } from "@/lib/blockchain";
 
 type DepositDialogProps = {
   goalId: string;
   goalName: string;
+  appId: number;
   onDepositSuccess: () => void;
   trigger?: React.ReactNode;
   initialAmount?: number;
@@ -37,12 +37,12 @@ const DepositSchema = z.object({
 
 type DepositFormValues = z.infer<typeof DepositSchema>;
 
-export function DepositDialog({ goalId, goalName, onDepositSuccess, trigger, initialAmount }: DepositDialogProps) {
+export function DepositDialog({ goalId, goalName, appId, onDepositSuccess, trigger, initialAmount }: DepositDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { user } = useAuth();
-  const { updateBalance } = useBankBalance();
+  const { activeAddress, connectWallet, isConnecting, signTransactions } = useWallet();
 
   const form = useForm<DepositFormValues>({
     resolver: zodResolver(DepositSchema),
@@ -50,17 +50,6 @@ export function DepositDialog({ goalId, goalName, onDepositSuccess, trigger, ini
       amount: initialAmount || ("" as unknown as number),
     }
   });
-
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    document.body.appendChild(script);
-
-    return () => {
-        document.body.removeChild(script);
-    }
-  }, []);
 
   useEffect(() => {
     if (initialAmount) {
@@ -78,60 +67,54 @@ export function DepositDialog({ goalId, goalName, onDepositSuccess, trigger, ini
         return;
     }
 
-    setIsSubmitting(true);
-
-    const options = {
-      key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-      amount: data.amount * 100,
-      currency: "INR",
-      name: "DhanSathi",
-      description: `Deposit to ${goalName}`,
-      modal: {
-          ondismiss: () => {
-              setIsSubmitting(false);
-          }
-      },
-      handler: async (response: any) => {
-        try {
-          addDepositToGoal(user.uid, goalId, { amount: data.amount, txId: response.razorpay_payment_id });
-          await updateBalance(-data.amount);
-          toast({
-            title: "Deposit Successful!",
-            description: "Your deposit has been successfully recorded.",
-          });
-          onDepositSuccess();
-          setIsOpen(false);
-          form.reset({ amount: "" as unknown as number });
-        } catch (error) {
-          toast({
-            variant: "destructive",
-            title: "Deposit Failed",
-            description: "Could not record your deposit.",
-          });
-        } finally {
-            setIsSubmitting(false);
-        }
-      },
-      prefill: {
-        name: "Test User",
-        email: "test.user@example.com",
-        contact: "9999999999",
-      },
-      theme: {
-        color: "#3399cc",
-      },
-    };
-
-    try {
-        const rzp = new Razorpay(options);
-        rzp.open();
-    } catch(err) {
+    if (!activeAddress) {
+      try {
+        await connectWallet();
+      } catch {
         toast({
-            variant: "destructive",
-            title: "Payment Error",
-            description: "Failed to initialize Razorpay. Please try again later."
+          variant: "destructive",
+          title: "Wallet Connection Failed",
+          description: "Please connect your Pera wallet to continue.",
         });
-        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    if (!activeAddress) {
+      toast({
+        variant: "destructive",
+        title: "Wallet Not Connected",
+        description: "Please connect your Pera wallet to continue.",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      toast({
+        title: "Confirm in Pera Wallet",
+        description: "Review and approve the Algorand transaction in your wallet.",
+      });
+
+      const txId = await depositToGoal(appId, activeAddress, data.amount, signTransactions);
+      addDepositToGoal(user.uid, goalId, { amount: data.amount, txId });
+
+      toast({
+        title: "Deposit Successful",
+        description: `On-chain transaction confirmed: ${txId.slice(0, 10)}...`,
+      });
+
+      onDepositSuccess();
+      setIsOpen(false);
+      form.reset({ amount: "" as unknown as number });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Deposit Failed",
+        description: error instanceof Error ? error.message : "Could not complete on-chain deposit.",
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -150,7 +133,7 @@ export function DepositDialog({ goalId, goalName, onDepositSuccess, trigger, ini
         <DialogHeader>
           <DialogTitle>Deposit to "{goalName}"</DialogTitle>
           <DialogDescription>
-            Enter the amount you wish to deposit.
+            Enter the amount in ALGO. You will confirm this transaction in Pera wallet.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -160,17 +143,17 @@ export function DepositDialog({ goalId, goalName, onDepositSuccess, trigger, ini
               name="amount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Amount (INR)</FormLabel>
+                  <FormLabel>Amount (ALGO)</FormLabel>
                   <FormControl>
-                    <Input type="number" step="any" placeholder="e.g., 500" {...field} />
+                    <Input type="number" step="any" placeholder="e.g., 2.5" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
+            <Button type="submit" className="w-full" disabled={isSubmitting || isConnecting}>
               {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {isSubmitting ? "Processing..." : "Confirm Deposit"}
+              {isConnecting ? "Connecting Wallet..." : isSubmitting ? "Processing..." : "Confirm in Pera Wallet"}
             </Button>
           </form>
         </Form>

@@ -27,9 +27,20 @@ async function sendWelcomeSms(phone: string) {
         recipient: phone,
       }),
     });
+
     if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+
+      if (contentType.includes('application/json')) {
+        const errorJson = await response.json();
+        const errorMessage = errorJson?.error || 'Unknown SMS error';
+        console.error('Failed to send welcome SMS:', errorMessage);
+        return;
+      }
+
       const errorText = await response.text();
-      console.error('Failed to send welcome SMS:', errorText);
+      const trimmed = errorText.replace(/\s+/g, ' ').slice(0, 180);
+      console.error('Failed to send welcome SMS:', trimmed);
     }
   } catch (error: any) {
     console.error('An unexpected network error occurred during welcome SMS:', error.message);

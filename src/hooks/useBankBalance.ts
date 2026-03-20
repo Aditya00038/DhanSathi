@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { doc, onSnapshot, setDoc, updateDoc, increment } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -21,6 +21,18 @@ export interface ConnectBankPayload {
 
 export const useBankBalance = () => {
   const { user } = useAuth();
+
+  const getFallbackAccount = useCallback((): Pick<BankAccount, 'userId' | 'bankName' | 'accountNickname' | 'status'> => {
+    if (!user) throw new Error('User not authenticated');
+
+    return {
+      userId: user.uid,
+      bankName: 'DhanSathi Wallet',
+      accountNickname: 'Primary Account',
+      status: 'active',
+    };
+  }, [user]);
+
   const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
   const [disconnectedAccount, setDisconnectedAccount] = useState<BankAccount | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,21 +81,42 @@ export const useBankBalance = () => {
   const reconnectBank = useCallback(async () => {
     if (!user) throw new Error('User not authenticated');
     const docRef = doc(db, 'bank_balances', user.uid);
-    await updateDoc(docRef, { status: 'active' });
-  }, [user]);
+    await setDoc(
+      docRef,
+      {
+        ...getFallbackAccount(),
+        status: 'active',
+      },
+      { merge: true }
+    );
+  }, [user, getFallbackAccount]);
 
   const updateBalance = useCallback(async (amount: number) => {
     if (!user) throw new Error('User not authenticated');
     const docRef = doc(db, 'bank_balances', user.uid);
-    await updateDoc(docRef, { balance: increment(amount) });
-  }, [user]);
+    await setDoc(
+      docRef,
+      {
+        ...getFallbackAccount(),
+        balance: increment(amount),
+      },
+      { merge: true }
+    );
+  }, [user, getFallbackAccount]);
 
   const disconnectBank = useCallback(async () => {
     if (!user) throw new Error('User not authenticated');
     const docRef = doc(db, 'bank_balances', user.uid);
-    await updateDoc(docRef, { status: 'disconnected' });
+    await setDoc(
+      docRef,
+      {
+        ...getFallbackAccount(),
+        status: 'disconnected',
+      },
+      { merge: true }
+    );
     setBankAccount(null);
-  }, [user]);
+  }, [user, getFallbackAccount]);
 
   return { bankAccount, disconnectedAccount, loading, connectBank, reconnectBank, updateBalance, disconnectBank };
 };

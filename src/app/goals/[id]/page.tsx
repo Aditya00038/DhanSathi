@@ -11,12 +11,15 @@ import { useParams } from "next/navigation";
 import { useWallet } from "@/contexts/WalletContext";
 import { useToast } from "@/hooks/use-toast";
 import AuthGuard from "@/components/auth/AuthGuard";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function GoalPage() {
   const params = useParams();
   const id = params.id as string;
-  const [goal, setGoal] = useState<Goal | null | undefined>(undefined);
+  const [goal, setGoal] = useState<Goal | null>(null);
+  const [isLoadingGoal, setIsLoadingGoal] = useState(true);
   const { activeAddress, connectWallet, isConnecting } = useWallet();
+  const { user, loading: isAuthLoading } = useAuth();
   const { toast } = useToast();
 
   const handleConnectWallet = async () => {
@@ -28,11 +31,22 @@ export default function GoalPage() {
   };
 
   useEffect(() => {
-    const found = getGoalById(id);
-    setGoal(found);
-  }, [id]);
+    if (isAuthLoading) {
+      return;
+    }
 
-  if (goal === undefined) {
+    if (!user) {
+      setGoal(null);
+      setIsLoadingGoal(false);
+      return;
+    }
+
+    const found = getGoalById(user.uid, id) || null;
+    setGoal(found);
+    setIsLoadingGoal(false);
+  }, [id, user, isAuthLoading]);
+
+  if (isAuthLoading || isLoadingGoal) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

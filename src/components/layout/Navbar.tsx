@@ -1,6 +1,7 @@
 'use client';
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,10 +12,7 @@ import {
   Menu,
   Sun,
   Moon,
-  TrendingUp,
   X,
-  Users,
-  Trophy,
   PiggyBank,
   Wallet,
 } from "lucide-react";
@@ -88,9 +86,14 @@ export default function Navbar() {
       <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl hidden md:block">
         <div className="max-w-7xl mx-auto px-6 flex h-14 items-center justify-between">
           <Link href="/dashboard" className="flex items-center gap-2.5 group">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
-              <TrendingUp className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <Image
+              src="/icons/DhanSathi.png"
+              alt="DhanSathi logo"
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-lg object-cover shadow-sm group-hover:shadow-md transition-shadow"
+              priority
+            />
             <span className="text-lg font-bold tracking-tight">DhanSathi</span>
           </Link>
 
@@ -141,9 +144,14 @@ export default function Navbar() {
       <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl md:hidden">
         <div className="px-4 flex h-13 items-center justify-between">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
-              <TrendingUp className="h-4 w-4 text-primary-foreground" />
-            </div>
+            <Image
+              src="/icons/DhanSathi.png"
+              alt="DhanSathi logo"
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-lg object-cover"
+              priority
+            />
             <span className="text-base font-bold tracking-tight">DhanSathi</span>
           </Link>
 
