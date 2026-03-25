@@ -3,19 +3,34 @@ import type { AIParsedTransaction } from './types'; // Switched to the correct t
 
 const MODEL_NAME = "gemini-1.5-flash";
 const TRANSACTION_KEYWORDS_REGEX = /(debited|credited|spent|received|withdrawn|deposited|sent|paid|transferred|transfer)/i;
+const INCOME_KEYWORDS_REGEX = /(salary|sal\s*credit|refund|cashback|reversal)/i;
+const BANK_NAME_REGEX = /\b(?:sbi|state\s*bank|hdfc|icici|axis|kotak|yes\s*bank|pnb|indusind|canara|bob|bank\s*of\s*baroda|idfc|federal\s*bank|union\s*bank)\b/i;
+const FAILED_TXN_REGEX = /\b(?:declined|failed|failure|unsuccessful)\b/i;
 
 const BRAND_CATEGORY_RULES: Array<{ pattern: RegExp; brand: string; category: string }> = [
-  { pattern: /kfc|kfcsapphire/i, brand: "KFC", category: "Food" },
-  { pattern: /swiggy/i, brand: "Swiggy", category: "Food" },
-  { pattern: /zomato/i, brand: "Zomato", category: "Food" },
-  { pattern: /myntra/i, brand: "Myntra", category: "Groceries" },
-  { pattern: /meesho/i, brand: "Meesho", category: "Groceries" },
-  { pattern: /blinkit/i, brand: "Blinkit", category: "Groceries" },
-  { pattern: /zepto/i, brand: "Zepto", category: "Groceries" },
-  { pattern: /bigbasket/i, brand: "BigBasket", category: "Groceries" },
-  { pattern: /amazon|flipkart|ajio/i, brand: "Shopping", category: "Shopping" },
-  { pattern: /uber|ola/i, brand: "Transport", category: "Transport" },
+  { pattern: /swiggy|zomato|kfc|dominos|pizza\s*hut/i, brand: "Food", category: "Food" },
+  { pattern: /amazon|flipkart|myntra|ajio|meesho|bigbasket/i, brand: "Shopping", category: "Shopping" },
+  { pattern: /uber|ola|irctc|makemytrip|redbus|rapido|fastag|toll/i, brand: "Travel", category: "Travel" },
+  { pattern: /\bunstop\b/i, brand: "Unstop", category: "Competition/Hackathon" },
+  { pattern: /\bdevfolio\b/i, brand: "Devfolio", category: "Competition/Hackathon" },
+  { pattern: /jio|reliance\s*jio|myjio/i, brand: "Jio", category: "Bills" },
+  { pattern: /airtel|bharti\s*airtel/i, brand: "Airtel", category: "Bills" },
+  { pattern: /vodafone|idea|\bvi\b/i, brand: "VI", category: "Bills" },
+  { pattern: /bsnl/i, brand: "BSNL", category: "Bills" },
+  { pattern: /electricity|recharge|dth|postpaid|prepaid|water\s*bill|gas\s*bill/i, brand: "Bills", category: "Bills" },
+  { pattern: /phonepe|paytm|gpay|google\s*pay|amazon\s*pay|mobikwik|upi/i, brand: "Payments", category: "Payments" },
+  { pattern: /netflix|spotify|prime\s*video|youtube\s*premium|hotstar/i, brand: "Subscription", category: "Subscription" },
+  { pattern: /salary|refund|cashback|reversal/i, brand: "Income", category: "Income" },
+  { pattern: /atm\s*fee|maintenance\s*charge|sms\s*charge|charge\b|charges\b/i, brand: "Charges", category: "Charges" },
+  { pattern: /atm\s*withdrawal|cash\s*withdrawal|cash\s*wdl|cash\s*wdr/i, brand: "ATM Withdrawal", category: "Cash" },
 ];
+
+const NON_PERSON_TOKENS = new Set([
+  "upi", "paytm", "phonepe", "gpay", "googlepay", "amazonpay", "mobikwik", "bank", "ltd", "limited", "pvt", "private",
+  "store", "mart", "supermarket", "services", "service", "retail", "enterprises", "solutions", "online", "india", "inr",
+  "jio", "airtel", "vi", "bsnl", "amazon", "flipkart", "swiggy", "zomato", "uber", "ola", "recharge", "scan", "scanner", "bigbasket",
+  "sbi", "hdfc", "icici", "axis", "kotak", "pnb", "bank"
+]);
 
 function resolveGeminiApiKey(): string {
   return (
@@ -26,17 +41,27 @@ function resolveGeminiApiKey(): string {
   );
 }
 
-// Updated prompt with clearer instructions for ambiguous cases
+// Strict parser prompt for Indian financial SMS.
 const promptTemplate = `
-You are an expert at parsing bank transaction SMS messages from the user's perspective.
-Your ONLY task is to extract transaction details and return them as a valid JSON array.
+You are an advanced financial SMS parser designed for Indian banking messages.
+Your job is to extract structured transaction data with HIGH accuracy.
 
 **Instructions:**
-1.  Find all individual transactions in the **Input Text**.
-2.  For each transaction, extract: \`amount\` (number), \`date\` (YYYY-MM-DD), \`merchant\` (string), and \`type\`.
-3.  **Crucially, if the text contains both 'debited' and 'credited', you MUST interpret it as a 'debit' transaction from the user's account.**
-4.  Handle dates like '03Jul25' by converting them to '2025-07-03'.
-5.  Output must be a JSON array only. Do not include markdown, explanation, or extra text.
+1. For each transaction, extract: amount, date, merchant, category, type.
+2. Merchant detection priority:
+  - If "to <name>" -> merchant is that name.
+  - If "at <name>" -> merchant is that name.
+  - If "for <brand> purchase" -> merchant is that brand.
+  - If "from <name>" in credit -> merchant is sender.
+  - If "via UPI to <name>" or "paid to <name>" -> merchant is that name.
+3. Ignore bank names and generic tokens as merchant (SBI, HDFC, ICICI, Axis, A/c, balance, txn, alert).
+4. Category must be one of: Food, Shopping, Travel, Bills, Payments, Person Transfer, Income, Subscription, Charges, Cash, Others.
+5. Type detection:
+  - debited/spent/paid -> debit
+  - credited/received/refund/reversed -> credit
+6. If declined/failed transaction, ignore it.
+7. Date formats to normalize: 27-Mar-26, 27/03/26, 27-03-2026, 03Jul25.
+8. Output must be STRICT JSON array only with keys amount, date, merchant, category, type.
 
 **Input Text:**
 {SMS_TEXT}
@@ -47,6 +72,21 @@ If no transactions are found, you MUST return an empty array: [].
 function parseFlexibleDate(input: string): string | undefined {
   const raw = input.trim();
   const compact = raw.replace(/\s+/g, "");
+
+  const ddMonDashYear = raw.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{2}|\d{4})$/);
+  if (ddMonDashYear) {
+    const day = ddMonDashYear[1].padStart(2, "0");
+    const mon = ddMonDashYear[2].toLowerCase();
+    const yy = ddMonDashYear[3];
+    const months: Record<string, string> = {
+      jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+      jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+    };
+    const month = months[mon];
+    if (!month) return undefined;
+    const year = yy.length === 2 ? `20${yy}` : yy;
+    return `${year}-${month}-${day}`;
+  }
 
   const ddMonYear = compact.match(/^(\d{1,2})([A-Za-z]{3})(\d{2}|\d{4})$/);
   if (ddMonYear) {
@@ -116,10 +156,35 @@ function cleanMerchantToken(raw: string): string {
     .trim();
 }
 
+function isBankName(raw: string): boolean {
+  return BANK_NAME_REGEX.test(raw);
+}
+
+function isLikelyPersonName(raw: string): boolean {
+  const cleaned = cleanMerchantToken(raw).replace(/\d+/g, "").trim();
+  if (!cleaned) return false;
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 3) return false;
+  if (words.some((w) => w.length < 2 || w.length > 16)) return false;
+  if (words.some((w) => !/^[A-Za-z]+$/.test(w))) return false;
+
+  const loweredWords = words.map((w) => w.toLowerCase());
+  if (loweredWords.some((w) => NON_PERSON_TOKENS.has(w))) return false;
+
+  const joined = loweredWords.join(" ");
+  for (const rule of BRAND_CATEGORY_RULES) {
+    if (rule.pattern.test(joined)) return false;
+  }
+
+  return true;
+}
+
 function toMerchantLabel(rawMerchant: string | undefined): string | undefined {
   if (!rawMerchant) return undefined;
   const cleaned = cleanMerchantToken(rawMerchant);
   if (!cleaned) return undefined;
+  if (isBankName(cleaned)) return undefined;
 
   for (const rule of BRAND_CATEGORY_RULES) {
     if (rule.pattern.test(cleaned)) {
@@ -129,6 +194,37 @@ function toMerchantLabel(rawMerchant: string | undefined): string | undefined {
 
   const generic = titleCase(cleaned.split(" ").slice(0, 2).join(" "));
   return `${generic} (Others)`;
+}
+
+function toMerchantLabelWithType(rawMerchant: string | undefined, type: "debit" | "credit" | undefined, contextText?: string): string | undefined {
+  const context = (contextText || "").toLowerCase();
+  if (/self\s*transfer/.test(context)) {
+    const fallbackName = rawMerchant ? titleCase(cleanMerchantToken(rawMerchant)) : "Self Transfer";
+    return `${fallbackName} (Others)`;
+  }
+
+  if (/atm\s*withdrawal|cash\s*withdrawal|cash\s*wdl|cash\s*wdr/.test(context)) {
+    return "ATM Withdrawal (Cash)";
+  }
+
+  if (/atm\s*fee|maintenance\s*charge|sms\s*charge|charge\b|charges\b/.test(context)) {
+    return "Bank Charges (Charges)";
+  }
+
+  if (INCOME_KEYWORDS_REGEX.test(context) || INCOME_KEYWORDS_REGEX.test(rawMerchant || "")) {
+    const kind = /salary/i.test(`${rawMerchant || ""} ${contextText || ""}`) ? "Salary" : "Refund";
+    return `${kind} (Income)`;
+  }
+
+  if (!rawMerchant) return undefined;
+  if (isBankName(rawMerchant)) return undefined;
+
+  if (isLikelyPersonName(rawMerchant)) {
+    const person = titleCase(cleanMerchantToken(rawMerchant));
+    return `${person} (Person Transfer)`;
+  }
+
+  return toMerchantLabel(rawMerchant);
 }
 
 function normalizeTransactions(payload: unknown): AIParsedTransaction[] {
@@ -147,11 +243,20 @@ function normalizeTransactions(payload: unknown): AIParsedTransaction[] {
             ? Number(amountRaw.replace(/,/g, ""))
             : undefined;
 
-      const merchant = typeof candidate.merchant === "string" ? toMerchantLabel(candidate.merchant.trim()) : undefined;
+      const type = normalizeType(candidate.type);
+      const categoryRaw = typeof candidate.category === "string" ? candidate.category.trim() : "";
+      let merchant = typeof candidate.merchant === "string"
+        ? toMerchantLabelWithType(candidate.merchant.trim(), type)
+        : undefined;
+
+      if (merchant && categoryRaw) {
+        const current = merchant.match(/^(.*?)\s*\((.*?)\)\s*$/);
+        const base = current?.[1]?.trim() || merchant;
+        const normalizedCategory = categoryRaw.length > 0 ? titleCase(categoryRaw) : current?.[2] || "Others";
+        merchant = `${base} (${normalizedCategory})`;
+      }
       const parsedDate =
         typeof candidate.date === "string" ? parseFlexibleDate(candidate.date) : undefined;
-
-      const type = normalizeType(candidate.type);
 
       const normalized: AIParsedTransaction = {
         amount: Number.isFinite(amount as number) ? (amount as number) : undefined,
@@ -215,11 +320,12 @@ function splitIntoTransactionChunks(sms: string): string[] {
 
 function extractTransactionFromChunk(chunk: string): AIParsedTransaction | null {
   const lowered = chunk.toLowerCase();
+  if (FAILED_TXN_REGEX.test(lowered)) return null;
   if (!TRANSACTION_KEYWORDS_REGEX.test(lowered)) {
     return null;
   }
 
-  const amountMatch = chunk.match(/(?:INR|Rs\.?|₹)\s*([0-9,]+(?:\.\d{1,2})?)/i);
+  const amountMatch = chunk.match(/(?:INR|Rs\.?|₹)\s*([0-9,]+(?:\.\d{1,2})?)/i) || chunk.match(/\b([0-9,]+(?:\.\d{1,2})?)\b/);
   const amount = amountMatch ? Number(amountMatch[1].replace(/,/g, "")) : undefined;
 
   const dateMatch = chunk.match(/\b(\d{1,2}[A-Za-z]{3}\d{2,4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/);
@@ -228,26 +334,31 @@ function extractTransactionFromChunk(chunk: string): AIParsedTransaction | null 
   // Keep user's perspective: debited + credited in same line is still debit.
   const type: "debit" | "credit" | undefined =
     /(debited|spent|withdrawn|sent|paid|transferred|transfer)/.test(lowered) ? "debit" :
-    /(credited|received|deposited)/.test(lowered) ? "credit" :
+    /(credited|received|deposited|reversed|refund)/.test(lowered) ? "credit" :
     undefined;
 
-  const toMerchant = chunk.match(/\bto\s+([^\s]+(?:\s+[^\s]+){0,3}?)(?=\s+(?:via|on|ref|call|if|not)\b|$)/i)?.[1];
-  const atMerchant = chunk.match(/\bat\s+([^\s]+(?:\s+[^\s]+){0,3}?)(?=\s+(?:via|on|ref|call|if|not)\b|$)/i)?.[1];
-  const fromMerchant = chunk.match(/\bfrom\s+([^\s]+(?:\s+[^\s]+){0,3}?)(?=\s+(?:via|on|ref|call|if|not|to)\b|$)/i)?.[1];
+  const inferredType = INCOME_KEYWORDS_REGEX.test(lowered) ? "credit" : type;
+
+  const forPurchaseMerchant = chunk.match(/\bfor\s+([A-Za-z][A-Za-z0-9& ._-]{1,40}?)\s+purchase\b/i)?.[1]?.trim();
+  const paidToMerchant = chunk.match(/\bpaid\s+to\s+([^\s]+(?:\s+[^\s]+){0,4}?)(?=\s+(?:via|on|ref|call|if|not|from|by)\b|$)/i)?.[1];
+  const upiToMerchant = chunk.match(/\bvia\s+upi\s+to\s+([^\s]+(?:\s+[^\s]+){0,4}?)(?=\s+(?:on|ref|call|if|not|from|by)\b|$)/i)?.[1];
+  const toMerchant = chunk.match(/\bto\s+([^\s]+(?:\s+[^\s]+){0,4}?)(?=\s+(?:via|on|ref|call|if|not|from|by)\b|$)/i)?.[1];
+  const atMerchant = chunk.match(/\bat\s+([^\s]+(?:\s+[^\s]+){0,4}?)(?=\s+(?:via|on|ref|call|if|not|from|by)\b|$)/i)?.[1];
+  const fromMerchant = chunk.match(/\bfrom\s+([^\s]+(?:\s+[^\s]+){0,4}?)(?=\s+(?:via|on|ref|call|if|not|to|by)\b|$)/i)?.[1];
 
   let merchantRaw: string | undefined;
-  if (type === "debit") {
-    merchantRaw = toMerchant || atMerchant || fromMerchant;
+  if (inferredType === "debit") {
+    merchantRaw = upiToMerchant || paidToMerchant || toMerchant || atMerchant || forPurchaseMerchant || fromMerchant;
   } else {
-    merchantRaw = fromMerchant || toMerchant || atMerchant;
+    merchantRaw = fromMerchant || upiToMerchant || paidToMerchant || toMerchant || atMerchant || forPurchaseMerchant;
   }
-  const merchant = toMerchantLabel(merchantRaw);
+  const merchant = toMerchantLabelWithType(merchantRaw, inferredType, chunk);
 
-  if (!amount && !merchant && !date && !type) {
+  if (!amount && !merchant && !date && !inferredType) {
     return null;
   }
 
-  return { amount, merchant, date, type };
+  return { amount, merchant, date, type: inferredType };
 }
 
 function extractWithRegexFallback(sms: string): AIParsedTransaction[] {

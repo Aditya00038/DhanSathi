@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PiggyBank, Shield, BarChart3, ClipboardPaste } from "lucide-react";
+import { PiggyBank, Shield, BarChart3, ClipboardPaste, Landmark } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const actions = [
@@ -7,11 +7,12 @@ const actions = [
   { href: "/goals/new", label: "On-Chain Goal", icon: Shield, accent: "text-blue-600 bg-blue-500/10" },
   { href: "/analytics", label: "Analytics", icon: BarChart3, accent: "text-amber-600 bg-amber-500/10" },
   { href: "/sms-parser", label: "SMS Paste", icon: ClipboardPaste, accent: "text-rose-600 bg-rose-500/10" },
+  { href: "/schemes", label: "Govt Schemes", icon: Landmark, accent: "text-violet-600 bg-violet-500/10" },
 ];
 
 export default function QuickActions() {
   return (
-    <div className="grid grid-cols-4 gap-2 md:gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 md:gap-3">
       {actions.map((a) => (
         <Link
           key={a.href}

@@ -4,13 +4,22 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { onAuthStateChanged, User, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import type { OccupationType, SocialCategoryType } from '@/lib/gov-schemes';
+
+export type RegisterProfileInput = {
+  state: string;
+  age: number;
+  annualIncome?: number;
+  occupation: OccupationType;
+  category: SocialCategoryType;
+};
 
 // 1. Define the context type, now including the register function
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string, phone: string) => Promise<void>;
+  register: (email: string, password: string, name: string, phone: string, profile: RegisterProfileInput) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -74,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // --- FULL REGISTER FUNCTION ---
-  const register = async (email: string, password: string, name: string, phone: string) => {
+  const register = async (email: string, password: string, name: string, phone: string, profile: RegisterProfileInput) => {
     setLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -89,6 +98,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         displayName: name,
         email: email,
         phoneNumber: phone,
+        state: profile.state,
+        age: profile.age,
+        ...(typeof profile.annualIncome === 'number' ? { annualIncome: profile.annualIncome } : {}),
+        occupation: profile.occupation,
+        category: profile.category,
+        bookmarkedSchemeIds: [],
         createdAt: new Date(),
       });
 

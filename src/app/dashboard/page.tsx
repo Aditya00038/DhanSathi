@@ -9,11 +9,38 @@ import QuickActions from "@/components/dashboard/QuickActions";
 import GoalsList from "@/components/dashboard/GoalsList";
 import RecentActivity from "@/components/dashboard/RecentActivity";
 import { getGoalsFirestore } from "@/lib/local-store";
-import { getAllNormalGoalsFirestore } from "@/lib/normal-goal-store";
+import { getAllNormalGoalsFirestore, getSavingsPrediction } from "@/lib/normal-goal-store";
 import { getGoalOnChainState } from "@/lib/blockchain";
 import type { Goal, GoalWithOnChainData, NormalGoal, Deposit } from "@/lib/types";
 import { fetchAlgoInrRate } from "@/lib/algo-inr";
 import { useAuth } from "@/contexts/AuthContext";
+import { getSavedSmsTransactions } from "@/lib/local-store";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+
+type UserProfile = {
+  phoneNumber?: string;
+  dailySavingsSmsSentOn?: string;
+  overspendSmsSentOn?: string;
+};
+
+function parseMerchantCategory(label: string): string {
+  const m = label.match(/^(.*?)\s*\((.*?)\)\s*$/);
+  if (!m) return "Others";
+  return m[2] || "Others";
+}
+
+async function sendSms(recipient: string, message: string) {
+  try {
+    await fetch("/api/send-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipient, message }),
+    });
+  } catch (error) {
+    console.error("Failed to send scheduled SMS:", error);
+  }
+}
 
 export default function Dashboard() {
   const { activeAddress, isConnecting } = useWallet();
@@ -80,6 +107,84 @@ export default function Dashboard() {
     });
     return allDeposits.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 5);
   }, [goals]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (normalGoals.length === 0) return;
+
+    const runDailySmsChecks = async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const userRef = doc(db, "users", user.uid);
+
+      let profile: UserProfile = {};
+      try {
+        const snap = await getDoc(userRef);
+        if (snap.exists()) profile = snap.data() as UserProfile;
+      } catch {
+        return;
+      }
+
+      const phone = (profile.phoneNumber || "").trim();
+      if (!phone) return;
+
+      const activeGoals = normalGoals.filter((g) => !g.goalCompleted && g.targetAmount > g.currentBalance);
+      if (activeGoals.length > 0 && profile.dailySavingsSmsSentOn !== today) {
+        const goalDailyTargets = activeGoals.map((g) => {
+          const prediction = getSavingsPrediction(g);
+          return {
+            name: g.name,
+            daily: Math.max(0, Math.ceil(prediction.requiredPerWeek / 7)),
+          };
+        });
+
+        const totalDaily = goalDailyTargets.reduce((sum, g) => sum + g.daily, 0);
+        const focusGoals = goalDailyTargets.slice(0, 2).map((g) => `${g.name}: ₹${g.daily}/day`).join(", ");
+        const msg = `DhanSathi reminder: Save ₹${totalDaily.toLocaleString("en-IN")}/day to stay on track. ${focusGoals}`;
+
+        await sendSms(phone, msg);
+        await setDoc(userRef, { dailySavingsSmsSentOn: today }, { merge: true });
+      }
+
+      if (profile.overspendSmsSentOn === today) return;
+
+      const last7Days = new Date();
+      last7Days.setDate(last7Days.getDate() - 7);
+
+      const recentDebitSms = getSavedSmsTransactions(user.uid).filter((tx) => {
+        if (tx.type !== "debit" || tx.amount <= 0) return false;
+        const d = new Date(tx.date);
+        return !Number.isNaN(d.getTime()) && d >= last7Days;
+      });
+
+      if (recentDebitSms.length === 0) return;
+
+      const byCategory = new Map<string, number>();
+      recentDebitSms.forEach((tx) => {
+        const category = parseMerchantCategory(tx.merchant);
+        byCategory.set(category, (byCategory.get(category) || 0) + tx.amount);
+      });
+
+      const ranked = Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1]);
+      const top = ranked[0];
+      if (!top) return;
+
+      const [topCategory, topAmount] = top;
+      const totalSpent = recentDebitSms.reduce((sum, t) => sum + t.amount, 0);
+      const isOverspending = topAmount >= 1000 && topAmount / Math.max(totalSpent, 1) >= 0.45;
+      if (!isOverspending) return;
+
+      const totalDaily = activeGoals.reduce((sum, g) => {
+        const prediction = getSavingsPrediction(g);
+        return sum + Math.max(0, Math.ceil(prediction.requiredPerWeek / 7));
+      }, 0);
+
+      const alertMsg = `DhanSathi alert: You spent ₹${topAmount.toLocaleString("en-IN")} on ${topCategory} in the last 7 days. Please reduce this category. From now, save ₹${totalDaily.toLocaleString("en-IN")}/day to achieve your goal.`;
+      await sendSms(phone, alertMsg);
+      await setDoc(userRef, { overspendSmsSentOn: today }, { merge: true });
+    };
+
+    runDailySmsChecks();
+  }, [user?.uid, normalGoals]);
 
   return (
     <AuthGuard>

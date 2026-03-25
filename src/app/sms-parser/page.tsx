@@ -4,8 +4,10 @@ import { useState, Suspense } from 'react';
 import Navbar from '@/components/layout/Navbar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import type { AIParsedTransaction } from '@/lib/types'; // Using the official type
 import { parseSmsAction } from './actions';
@@ -13,6 +15,21 @@ import { useBankBalance } from '@/hooks/useBankBalance';
 import { useAuth } from '@/contexts/AuthContext';
 import { saveSmsParsedTransactions } from '@/lib/local-store';
 import Link from 'next/link';
+
+const CATEGORY_OPTIONS = ['Food', 'Shopping', 'Travel', 'Bills', 'Payments', 'Person Transfer', 'Income', 'Subscription', 'Competition/Hackathon', 'Charges', 'Cash', 'Others'];
+
+function parseMerchantLabel(label?: string): { brand: string; category: string } {
+  if (!label) return { brand: '', category: 'Others' };
+  const match = label.match(/^(.*?)\s*\((.*?)\)\s*$/);
+  if (!match) return { brand: label, category: 'Others' };
+  return { brand: (match[1] || '').trim(), category: (match[2] || 'Others').trim() };
+}
+
+function composeMerchantLabel(brand: string, category: string): string {
+  const cleanBrand = brand.trim() || 'Unknown';
+  const cleanCategory = category.trim() || 'Others';
+  return `${cleanBrand} (${cleanCategory})`;
+}
 
 function ErrorDisplay({ message }: { message: string }) {
   return (
@@ -32,6 +49,14 @@ export default function SmsParserPage() {
   const { bankAccount, updateBalance } = useBankBalance();
   const { user } = useAuth();
   const { toast } = useToast();
+
+  const updateTransaction = (index: number, updater: (tx: AIParsedTransaction) => AIParsedTransaction) => {
+    setParsedTransactions((prev) => prev.map((tx, i) => (i === index ? updater(tx) : tx)));
+  };
+
+  const removeTransaction = (index: number) => {
+    setParsedTransactions((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleParse = async () => {
     if (!smsInput.trim()) {
@@ -153,16 +178,72 @@ export default function SmsParserPage() {
                     <TableHead>Amount</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Merchant</TableHead>
+                    <TableHead>Category</TableHead>
                     <TableHead>Type</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {parsedTransactions.map((t, i) => (
-                    <TableRow key={i}>
+                    <TableRow key={`${t.amount || 0}-${t.date || ''}-${i}`}>
                       <TableCell className='font-medium'>{t.amount ? `₹${t.amount.toFixed(2)}` : 'N/A'}</TableCell>
                       <TableCell>{t.date || 'N/A'}</TableCell>
-                      <TableCell>{t.merchant || 'N/A'}</TableCell>
-                      <TableCell>{t.type || 'N/A'}</TableCell>
+                      <TableCell>
+                        <Input
+                          value={parseMerchantLabel(t.merchant).brand}
+                          placeholder='Merchant or person name'
+                          onChange={(e) => {
+                            const parsed = parseMerchantLabel(t.merchant);
+                            updateTransaction(i, (old) => ({
+                              ...old,
+                              merchant: composeMerchantLabel(e.target.value, parsed.category),
+                            }));
+                          }}
+                          className='min-w-[180px]'
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={parseMerchantLabel(t.merchant).category}
+                          onValueChange={(value) => {
+                            const parsed = parseMerchantLabel(t.merchant);
+                            updateTransaction(i, (old) => ({
+                              ...old,
+                              merchant: composeMerchantLabel(parsed.brand, value),
+                            }));
+                          }}
+                        >
+                          <SelectTrigger className='min-w-[150px]'>
+                            <SelectValue placeholder='Category' />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CATEGORY_OPTIONS.map((category) => (
+                              <SelectItem key={category} value={category}>{category}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={t.type || 'debit'}
+                          onValueChange={(value: 'debit' | 'credit') => {
+                            updateTransaction(i, (old) => ({ ...old, type: value }));
+                          }}
+                        >
+                          <SelectTrigger className='min-w-[110px]'>
+                            <SelectValue placeholder='Type' />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value='debit'>debit</SelectItem>
+                            <SelectItem value='credit'>credit</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Button variant='destructive' size='sm' onClick={() => removeTransaction(i)}>
+                          Remove
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

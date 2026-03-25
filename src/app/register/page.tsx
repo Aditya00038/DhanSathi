@@ -8,6 +8,18 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Eye, EyeOff, TrendingUp, User, Mail, Lock, Phone } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import type { OccupationType, SocialCategoryType } from '@/lib/gov-schemes';
+
+const OCCUPATIONS: OccupationType[] = ['student', 'farmer', 'salaried', 'self-employed'];
+const CATEGORIES: SocialCategoryType[] = ['General', 'OBC', 'SC', 'ST', 'Minority'];
+const INDIAN_STATES_AND_UTS = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh',
+  'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+  'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
+  'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+];
 
 function getPasswordChecks(password: string) {
   return {
@@ -45,11 +57,32 @@ function normalizeIndianPhone(raw: string) {
   return digits.slice(0, 10);
 }
 
+function calculateAgeFromBirthdate(birthDateIso: string): number | null {
+  if (!birthDateIso) return null;
+  const birthDate = new Date(birthDateIso);
+  if (Number.isNaN(birthDate.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+
+  return age;
+}
+
 
 export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [stateName, setStateName] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [annualIncome, setAnnualIncome] = useState('');
+  const [occupation, setOccupation] = useState<OccupationType | ''>('');
+  const [category, setCategory] = useState<SocialCategoryType | ''>('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -64,11 +97,20 @@ export default function Register() {
   const doPasswordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   const phoneDigits = normalizeIndianPhone(phone);
   const isPhoneValid = phoneDigits.length === 10;
+  const parsedAge = calculateAgeFromBirthdate(birthDate);
+  const parsedIncome = annualIncome.trim() === '' ? undefined : Number(annualIncome);
+  const isAgeValid = Number.isFinite(parsedAge) && parsedAge >= 13 && parsedAge <= 100;
+  const isIncomeValid = typeof parsedIncome === 'undefined' || (Number.isFinite(parsedIncome) && parsedIncome >= 0);
   const isPasswordValid = password.length >= 6;
   const canSubmit =
     name.trim().length > 1 &&
     email.trim().length > 0 &&
     isPhoneValid &&
+    stateName.trim().length > 1 &&
+    isAgeValid &&
+    isIncomeValid &&
+    Boolean(occupation) &&
+    Boolean(category) &&
     isPasswordValid &&
     doPasswordsMatch;
 
@@ -86,6 +128,26 @@ export default function Register() {
       return;
     }
 
+    if (!stateName.trim()) {
+      setError('Please select your state.');
+      return;
+    }
+
+    if (!isAgeValid) {
+      setError('Please select a valid birthdate (age 13-100).');
+      return;
+    }
+
+    if (!isIncomeValid) {
+      setError('Please enter a valid annual income.');
+      return;
+    }
+
+    if (!occupation || !category) {
+      setError('Please select occupation and category.');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError('Passwords do not match.');
       return;
@@ -93,7 +155,13 @@ export default function Register() {
 
     try {
       setSubmitting(true);
-      await register(email.trim(), password, name.trim(), phoneDigits);
+      await register(email.trim(), password, name.trim(), phoneDigits, {
+        state: stateName.trim(),
+        age: Number(parsedAge),
+        annualIncome: parsedIncome,
+        occupation,
+        category,
+      });
       router.push('/dashboard'); // Redirect to dashboard on successful registration
     } catch (err: any) {
       // --- THIS IS THE NEW, IMPROVED ERROR HANDLING ---
@@ -186,6 +254,77 @@ export default function Register() {
             <p className={`mt-1 text-xs ${isPhoneValid || phone.length === 0 ? 'text-muted-foreground' : 'text-red-500'}`}>
               {isPhoneValid || phone.length === 0 ? 'Format: 10 digits (India).' : 'Phone number must be exactly 10 digits.'}
             </p>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium">State</label>
+            <Select value={stateName} onValueChange={setStateName}>
+              <SelectTrigger className="h-11 rounded-xl border-border/60 bg-background">
+                <SelectValue placeholder="Select your state" />
+              </SelectTrigger>
+              <SelectContent>
+                {INDIAN_STATES_AND_UTS.map((item) => (
+                  <SelectItem key={item} value={item}>{item}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="mb-2 block text-sm font-medium">Birthdate</label>
+              <Input
+                type="date"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                className="h-11 rounded-xl border-border/60 bg-background"
+                required
+              />
+              <p className={`mt-1 text-xs ${isAgeValid || !birthDate ? 'text-muted-foreground' : 'text-red-500'}`}>
+                {isAgeValid ? `Detected age: ${parsedAge}` : 'Age must be between 13 and 100.'}
+              </p>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium">Annual Income (INR)</label>
+              <Input
+                type="number"
+                min={0}
+                step={1000}
+                value={annualIncome}
+                onChange={(e) => setAnnualIncome(e.target.value)}
+                placeholder="Optional (e.g., 300000)"
+                className="h-11 rounded-xl border-border/60 bg-background"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="mb-2 block text-sm font-medium">Occupation</label>
+              <Select value={occupation} onValueChange={(v) => setOccupation(v as OccupationType)}>
+                <SelectTrigger className="h-11 rounded-xl border-border/60 bg-background">
+                  <SelectValue placeholder="Select occupation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {OCCUPATIONS.map((item) => (
+                    <SelectItem key={item} value={item}>{item}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium">Category</label>
+              <Select value={category} onValueChange={(v) => setCategory(v as SocialCategoryType)}>
+                <SelectTrigger className="h-11 rounded-xl border-border/60 bg-background">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((item) => (
+                    <SelectItem key={item} value={item}>{item}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div>
