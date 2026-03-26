@@ -184,13 +184,14 @@ export default function ChatBot() {
           return txDate === todayDate && t.type === 'debit';
         });
         const todayTotal = todayTransactions.reduce((sum, t) => sum + (t.amount || 0), 0);
+        const activeGoals = goalSummaries.filter((g) => !g.goalCompleted).length;
 
         setUserContext({
           totalSaved,
           totalTarget,
           totalSavedInr,
           totalTargetInr,
-          activeGoals: goals.length + normalGoals.filter(g => !g.goalCompleted).length - completedGoals,
+          activeGoals,
           completedGoals,
           goals: goalSummaries,
           todaySpending: todayTransactions.map(t => ({

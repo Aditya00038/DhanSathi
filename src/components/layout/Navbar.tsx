@@ -15,11 +15,12 @@ import {
   PiggyBank,
   Wallet,
   ClipboardPaste,
+  Globe,
 } from "lucide-react";
 import { useWallet } from "@/contexts/WalletContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "next-themes";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,8 +73,16 @@ export default function Navbar() {
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [mobileLang, setMobileLang] = useState("en");
+
+  const restoreBodyInteractivity = useCallback(() => {
+    document.body.style.pointerEvents = "";
+    document.body.style.overflow = "";
+    document.body.style.removeProperty("padding-right");
+    document.body.removeAttribute("data-scroll-locked");
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -82,10 +91,28 @@ export default function Navbar() {
   }, []);
 
   const handleLogout = async () => {
-    await disconnectWallet();
-    await logout();
-    setShowLogoutDialog(false);
+    try {
+      setShowLogoutDialog(false);
+      setMobileMenuOpen(false);
+      await disconnectWallet();
+      await logout();
+    } finally {
+      // Defensive cleanup for any stale Radix/overlay body locks.
+      setTimeout(() => restoreBodyInteractivity(), 0);
+    }
   };
+
+  const openLogoutDialog = () => {
+    // Let mobile sheet close first, then open dialog on top.
+    setMobileMenuOpen(false);
+    setTimeout(() => setShowLogoutDialog(true), 50);
+  };
+
+  useEffect(() => {
+    // Route changes can happen while overlays are open; ensure page remains interactive.
+    const timer = setTimeout(() => restoreBodyInteractivity(), 0);
+    return () => clearTimeout(timer);
+  }, [pathname, restoreBodyInteractivity]);
 
   const handleConnectWallet = async () => {
     try {
@@ -175,7 +202,7 @@ export default function Navbar() {
                 {isConnecting ? "Connecting…" : "Connect Wallet"}
               </Button>
             )}
-            <Button onClick={() => setShowLogoutDialog(true)} variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+            <Button onClick={openLogoutDialog} variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10">
               <LogOut className="h-4 w-4" />
             </Button>
           </div>
@@ -205,7 +232,7 @@ export default function Navbar() {
                 {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
               </Button>
             )}
-            <Sheet>
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-10 w-10"><Menu className="h-5 w-5" /></Button>
               </SheetTrigger>
@@ -236,8 +263,9 @@ export default function Navbar() {
                   </nav>
                   <div className="p-3 border-t border-border space-y-2">
                     <div className="rounded-lg border border-border p-2 notranslate" translate="no">
-                      <label htmlFor="mobile-language" className="block text-xs text-muted-foreground mb-1 notranslate" translate="no">
-                        भाषा / Language
+                      <label htmlFor="mobile-language" className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1 notranslate" translate="no">
+                        <Globe className="h-3.5 w-3.5" />
+                        <span>भाषा / Language</span>
                       </label>
                       <select
                         id="mobile-language"
@@ -266,10 +294,12 @@ export default function Navbar() {
                         {isConnecting ? "Connecting…" : "Connect Wallet"}
                       </Button>
                     )}
-                    <Button onClick={() => setShowLogoutDialog(true)} variant="ghost" className="w-full h-9 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-                      <LogOut className="mr-2 h-4 w-4" />
-                      Logout
-                    </Button>
+                    <SheetClose asChild>
+                      <Button onClick={openLogoutDialog} variant="ghost" className="w-full h-9 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Logout
+                      </Button>
+                    </SheetClose>
                   </div>
                 </div>
               </SheetContent>
@@ -307,7 +337,7 @@ export default function Navbar() {
 
       {/* Logout confirmation */}
       <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
-        <AlertDialogContent className="max-w-sm">
+        <AlertDialogContent className="max-w-sm z-[120]">
           <AlertDialogHeader>
             <AlertDialogTitle>Logout?</AlertDialogTitle>
             <AlertDialogDescription>You will need to sign in again to access your data.</AlertDialogDescription>

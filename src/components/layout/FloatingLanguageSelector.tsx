@@ -94,7 +94,7 @@ export default function FloatingLanguageSelector() {
   }, []);
 
   return (
-    <div className="hidden md:block fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-3 md:bottom-6 md:right-6 z-[55] notranslate" translate="no">
+    <div className="hidden md:block fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-3 md:bottom-6 md:left-6 z-[55] notranslate" translate="no">
       <div className="rounded-xl border border-border/70 bg-background/95 backdrop-blur px-3 py-2 shadow-lg notranslate" translate="no">
         <label htmlFor="floating-language" className="block text-[11px] text-muted-foreground mb-1 notranslate" translate="no">
           भाषा / Language

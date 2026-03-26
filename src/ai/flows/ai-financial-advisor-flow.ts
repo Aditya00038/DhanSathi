@@ -19,6 +19,24 @@ function isQuotaOrRateLimitError(error: unknown): boolean {
   return msg.includes('429') || msg.includes('too many requests') || msg.includes('quota exceeded') || msg.includes('rate limit');
 }
 
+function isDailyQuotaExceededError(error: unknown): boolean {
+  const msg = String((error as any)?.message || error || '').toLowerCase();
+  return (
+    msg.includes('daily') ||
+    msg.includes('per day') ||
+    msg.includes('quota exhausted') ||
+    msg.includes('limit exceeded')
+  );
+}
+
+function msUntilTomorrow(): number {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+  return Math.max(60_000, tomorrow.getTime() - now.getTime());
+}
+
 interface FinancialAdviceInput {
   userMessage: string;
   context?: {
@@ -53,6 +71,85 @@ interface FinancialAdviceInput {
   conversationHistory?: { role: 'user' | 'assistant'; content: string }[];
 }
 
+function normalizeText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9\s₹]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenize(input: string): string[] {
+  return normalizeText(input)
+    .split(' ')
+    .filter((t) => t.length >= 3 && !/^[0-9]+$/.test(t));
+}
+
+function dedupeSuggestions(suggestions: string[], limit = 4): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const item of suggestions) {
+    const key = item.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(item.trim());
+    if (output.length >= limit) break;
+  }
+  return output;
+}
+
+function findGoalByNameHeuristic(
+  text: string,
+  goals?: FinancialAdviceInput['context']['goals']
+) {
+  if (!goals?.length) return null;
+
+  const normalized = normalizeText(text);
+  const textTokens = new Set(tokenize(text));
+
+  // Direct include check first for best precision.
+  const direct = goals.find((g) => {
+    const goalName = normalizeText(g.name);
+    const firstWord = goalName.split(' ')[0];
+    return normalized.includes(goalName) || (firstWord && normalized.includes(firstWord));
+  });
+  if (direct) return direct;
+
+  // Token overlap scoring for short and noisy user input.
+  let bestGoal: (typeof goals)[number] | null = null;
+  let bestScore = 0;
+  for (const goal of goals) {
+    const goalTokens = tokenize(goal.name);
+    if (goalTokens.length === 0) continue;
+    const overlap = goalTokens.filter((t) => textTokens.has(t)).length;
+    const score = overlap / goalTokens.length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestGoal = goal;
+    }
+  }
+
+  return bestScore >= 0.5 ? bestGoal : null;
+}
+
+function inferGoalFromConversation(
+  conversationHistory: FinancialAdviceInput['conversationHistory'] | undefined,
+  goals?: FinancialAdviceInput['context']['goals']
+) {
+  if (!conversationHistory?.length || !goals?.length) return null;
+  const recentUserMessages = conversationHistory
+    .filter((m) => m.role === 'user')
+    .slice(-6)
+    .reverse();
+
+  for (const msg of recentUserMessages) {
+    const matched = findGoalByNameHeuristic(msg.content, goals);
+    if (matched) return matched;
+  }
+
+  return null;
+}
+
 function compactResponse(text: string): string {
   const cleaned = text.replace(/\n{3,}/g, '\n\n').trim();
   if (cleaned.length <= 700) return cleaned;
@@ -79,11 +176,15 @@ type Intent =
   | 'habit_building' | 'app_help' | 'multiple_goals' | 'progress_check'
   | 'goal_specific' | 'daily_spending_check' | 'general';
 
-function detectIntent(message: string, context?: FinancialAdviceInput['context']): Intent {
-  const m = message.toLowerCase();
+function detectIntent(
+  message: string,
+  context?: FinancialAdviceInput['context'],
+  conversationHistory?: FinancialAdviceInput['conversationHistory']
+): Intent {
+  const m = normalizeText(message);
 
   // Follow-up questions like "when i deposit 600 date" should stay goal-aware
-  if (/\b(when|date)\b.*\b(deposit|deposited|saved|add|added|put)\b|\b(deposit|deposited|saved|add|added|put)\b.*\b(when|date)\b/i.test(m))
+  if (/\b(when|date)\b.*\b(deposit|deposited|saved|add|added|put|withdraw|withdrew)\b|\b(deposit|deposited|saved|add|added|put|withdraw|withdrew)\b.*\b(when|date)\b/i.test(m))
     return 'goal_specific';
   
   // Check for daily spending questions
@@ -91,12 +192,11 @@ function detectIntent(message: string, context?: FinancialAdviceInput['context']
     return 'daily_spending_check';
   
   // Check if mentioning a specific goal by name
-  if (context?.goals && context.goals.length > 0) {
-    for (const goal of context.goals) {
-      if (m.includes(goal.name.toLowerCase()) || m.includes(goal.name.toLowerCase().split(' ')[0])) {
-        return 'goal_specific';
-      }
-    }
+  if (findGoalByNameHeuristic(m, context?.goals)) return 'goal_specific';
+
+  // Follow-up references like "this goal" / "it" should stay in goal context if recent history had a goal mention.
+  if (/\b(this|that|it|same)\b.*\b(goal|deposit|withdraw|deadline|target|progress)\b|\b(goal|deposit|withdraw|deadline|target|progress)\b.*\b(this|that|it|same)\b/i.test(m)) {
+    if (inferGoalFromConversation(conversationHistory, context?.goals)) return 'goal_specific';
   }
   
   // Greetings
@@ -136,11 +236,15 @@ function detectIntent(message: string, context?: FinancialAdviceInput['context']
 }
 
 // ─── Smart Contextual Response Generator ───
-function generateSmartResponse(message: string, context?: FinancialAdviceInput['context']): {
+function generateSmartResponse(
+  message: string,
+  context?: FinancialAdviceInput['context'],
+  conversationHistory?: FinancialAdviceInput['conversationHistory']
+): {
   response: string;
   suggestions: string[];
 } {
-  const intent = detectIntent(message, context);
+  const intent = detectIntent(message, context, conversationHistory);
 
   const saved = context?.totalSaved ?? 0;
   const target = context?.totalTarget ?? 0;
@@ -158,8 +262,8 @@ function generateSmartResponse(message: string, context?: FinancialAdviceInput['
   // Helper function to find matching goal
   function findGoal(message: string) {
     if (!context?.goals || context.goals.length === 0) return null;
-    const lower = message.toLowerCase();
-    const byName = context.goals.find(g => lower.includes(g.name.toLowerCase()) || lower.includes(g.name.toLowerCase().split(' ')[0]));
+    const lower = normalizeText(message);
+    const byName = findGoalByNameHeuristic(lower, context.goals);
     if (byName) return byName;
 
     // Try matching by asked amount (e.g. "when i deposit 600?")
@@ -172,7 +276,11 @@ function generateSmartResponse(message: string, context?: FinancialAdviceInput['
       if (byAmount) return byAmount;
     }
 
-    // If only one goal exists, assume follow-up refers to that goal
+    // Try recent conversation for implicit follow-ups.
+    const fromHistory = inferGoalFromConversation(conversationHistory, context.goals);
+    if (fromHistory) return fromHistory;
+
+    // If only one goal exists, assume follow-up refers to that goal.
     if (context.goals.length === 1) return context.goals[0];
     return null;
   }
@@ -197,8 +305,10 @@ function generateSmartResponse(message: string, context?: FinancialAdviceInput['
     case 'goal_specific':
       const goal = findGoal(message);
       if (goal) {
-        const isDepositQuestion = /\b(did|have|has|am|i)\b.*\b(deposit|deposited|saved|add|added|put)\b|\bdeposit\b.*\b(goal|money|for)\b/i.test(message.toLowerCase());
-        const isDateQuestion = /\bwhen\b|\bdate\b|\bwhich\s+day\b/i.test(message.toLowerCase());
+        const normalizedMessage = normalizeText(message);
+        const isDepositQuestion = /\b(did|have|has|am|i)\b.*\b(deposit|deposited|saved|add|added|put|withdraw|withdrew)\b|\b(deposit|withdraw)\b.*\b(goal|money|for)\b/i.test(normalizedMessage);
+        const isDateQuestion = /\bwhen\b|\bdate\b|\bwhich\s+day\b/i.test(normalizedMessage);
+        const isWithdrawalQuestion = /\bwithdraw|withdrew|withdrawal\b/i.test(normalizedMessage);
         const goalProgress = goal.targetAmount > 0 
           ? ((goal.currentSaved / goal.targetAmount) * 100).toFixed(1)
           : '0';
@@ -215,38 +325,39 @@ function generateSmartResponse(message: string, context?: FinancialAdviceInput['
           ? `₹${Math.round(amt).toLocaleString('en-IN')}`
           : `${amt.toFixed(2)} ALGO`;
 
-        const amountMatch = message.toLowerCase().match(/(?:₹|rs\.?\s*)?\s*(\d{2,}(?:,\d{3})*(?:\.\d+)?)/);
+        const amountMatch = normalizedMessage.match(/(?:₹|rs\.?\s*)?\s*(\d{2,}(?:,\d{3})*(?:\.\d+)?)/);
         const askedAmount = amountMatch ? Number(amountMatch[1].replace(/,/g, '')) : NaN;
 
         if (isDepositQuestion && isDateQuestion) {
-          const deposits = (goal.transactions || [])
-            .filter((tx) => tx.type === 'deposit')
+          const relevantTxType = isWithdrawalQuestion ? 'withdrawal' : 'deposit';
+          const transactions = (goal.transactions || [])
+            .filter((tx) => tx.type === relevantTxType)
             .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-          const matchedDeposit = !Number.isNaN(askedAmount)
-            ? deposits.find((tx) => Math.abs(tx.amount - askedAmount) < 0.01)
-            : deposits[0];
+          const matchedTransaction = !Number.isNaN(askedAmount)
+            ? transactions.find((tx) => Math.abs(tx.amount - askedAmount) < 0.01)
+            : transactions[0];
 
-          if (matchedDeposit) {
+          if (matchedTransaction) {
             return {
-              response: `You deposited ${amountFormat(matchedDeposit.amount)} for **${goal.name}** on **${new Date(matchedDeposit.timestamp).toLocaleDateString()}**.\n\nCurrent progress:\n• Saved: ${amountFormat(goal.currentSaved)}\n• Target: ${amountFormat(goal.targetAmount)}\n• Progress: ${goalProgress}%`,
-              suggestions: [
+              response: `${isWithdrawalQuestion ? 'You withdrew' : 'You deposited'} ${amountFormat(matchedTransaction.amount)} for **${goal.name}** on **${new Date(matchedTransaction.timestamp).toLocaleDateString()}**.\n\nCurrent progress:\n• Saved: ${amountFormat(goal.currentSaved)}\n• Target: ${amountFormat(goal.targetAmount)}\n• Progress: ${goalProgress}%`,
+              suggestions: dedupeSuggestions([
                 'Show my latest deposits',
                 `How much weekly for ${goal.name}?`,
                 'Am I on track?',
                 'How to finish faster?'
-              ],
+              ]),
             };
           }
 
           return {
-            response: `I could not find a deposit record${!Number.isNaN(askedAmount) ? ` of ${amountFormat(askedAmount)}` : ''} for **${goal.name}** in your goal transactions.\n\nCurrent progress:\n• Saved: ${amountFormat(goal.currentSaved)}\n• Target: ${amountFormat(goal.targetAmount)}\n• Progress: ${goalProgress}%`,
-            suggestions: [
+            response: `I could not find a ${isWithdrawalQuestion ? 'withdrawal' : 'deposit'} record${!Number.isNaN(askedAmount) ? ` of ${amountFormat(askedAmount)}` : ''} for **${goal.name}** in your goal transactions.\n\nCurrent progress:\n• Saved: ${amountFormat(goal.currentSaved)}\n• Target: ${amountFormat(goal.targetAmount)}\n• Progress: ${goalProgress}%`,
+            suggestions: dedupeSuggestions([
               'Show goal progress',
               'Did I deposit for this goal?',
               'How much should I save weekly?',
               'View goal details'
-            ],
+            ]),
           };
         }
 
@@ -254,23 +365,23 @@ function generateSmartResponse(message: string, context?: FinancialAdviceInput['
           const hasDeposited = goal.currentSaved > 0;
           return {
             response: `${hasDeposited ? 'Yes' : 'No'}${hasDeposited ? `, you have deposited for **${goal.name}**.` : `, no deposit is recorded yet for **${goal.name}**.`}\n\n• Saved: ${amountFormat(goal.currentSaved)}\n• Target: ${amountFormat(goal.targetAmount)}\n• Progress: ${goalProgress}%\n• Remaining: ${amountFormat(remaining)}\n\n${hasDeposited ? 'You are on track. Keep adding weekly to finish on time.' : 'Make your first deposit now to start building momentum.'}`,
-            suggestions: [
+            suggestions: dedupeSuggestions([
               `How much should I save weekly for ${goal.name}?`,
               'Show my goal progress',
               'How to finish faster?',
               'Motivate me'
-            ],
+            ]),
           };
         }
 
         return {
           response: `**${goal.name}** ${goal.type === 'on-chain' ? '🔒' : '💰'}\n\n**Current Status:**\n• Saved: ${amountFormat(goal.currentSaved)}\n• Target: ${amountFormat(goal.targetAmount)}\n• Progress: ${goalProgress}%\n• Days Left: ${daysLeft} (${weeksLeft} weeks)\n\n**What You Need:**\n• Daily: ${amountFormat(perDay)}\n• Weekly: ${amountFormat(perWeek)}\n\n${goal.goalCompleted ? '✅ **Goal completed! Celebrate your achievement!**' : remaining > 0 ? `**To finish on time:** Save ${amountFormat(perWeek)}/week starting now. Going strong! 💪` : '**Almost there!**'}\n\nGo to your goal's detail page for personalized AI advice on how to reach it faster!`,
-          suggestions: [
+            suggestions: dedupeSuggestions([
             `How to save ${amountFormat(perWeek)}/week?`,
             goal.type === 'off-chain' ? 'Withdraw from this goal?' : 'About this Smart Contract goal',
             'What if I fall behind?',
             'Motivate me to finish'
-          ],
+            ]),
         };
       }
       // Fallback if goal not found
@@ -278,7 +389,7 @@ function generateSmartResponse(message: string, context?: FinancialAdviceInput['
         response: `I couldn't find a goal matching "${message.split(/\s+/).find(w => w.length > 3) || 'that'}" in your active goals.\n\n**Your Current Goals:**\n${context?.goals && context.goals.length > 0 
           ? context.goals.map(g => `• ${g.name} (${g.type === 'on-chain' ? 'Smart Contract' : 'Savings'}) — ${((g.currentSaved / g.targetAmount) * 100).toFixed(0)}% complete`).join('\n')
           : 'No active goals yet. Create one to get started!'}\n\nWhich goal would you like help with?`,
-        suggestions: context?.goals?.map(g => g.name) || ['Create a savings goal', 'Create a Smart Contract goal', 'Help me set a goal'],
+          suggestions: dedupeSuggestions(context?.goals?.map(g => g.name) || ['Create a savings goal', 'Create a Smart Contract goal', 'Help me set a goal']),
       };
 
     case 'greeting':
@@ -402,7 +513,7 @@ function generateSmartResponse(message: string, context?: FinancialAdviceInput['
 // ─── Main Export ───
 export async function getFinancialAdvice(input: FinancialAdviceInput) {
   // Detect intent for suggestion generation and fallback categorization
-  const intent = detectIntent(input.userMessage, input.context);
+  const intent = detectIntent(input.userMessage, input.context, input.conversationHistory);
 
   // Build goals context string
   const goalsContext = input.context?.goals?.length
@@ -495,7 +606,7 @@ Use this data to personalize your response.` : ''}`;
           success: true,
           data: {
             response: compactResponse(text),
-            suggestions,
+            suggestions: dedupeSuggestions(suggestions),
             category: intent as string,
           },
         };
@@ -503,8 +614,27 @@ Use this data to personalize your response.` : ''}`;
     } catch (error) {
       if (isQuotaOrRateLimitError(error)) {
         const retryMs = extractRetryMsFromError(error);
-        aiCooldownUntil = Date.now() + retryMs;
-        console.warn(`Gemini quota/rate-limit reached. Using fallback for ${Math.ceil(retryMs / 1000)}s.`);
+        const isDailyQuota = isDailyQuotaExceededError(error);
+        const cooldownMs = isDailyQuota ? Math.max(retryMs, msUntilTomorrow()) : retryMs;
+        aiCooldownUntil = Date.now() + cooldownMs;
+        console.warn(`Gemini quota/rate-limit reached. Using fallback for ${Math.ceil(cooldownMs / 1000)}s.`);
+
+        if (isDailyQuota) {
+          return {
+            success: true,
+            data: {
+              response:
+                'Gemini daily quota is over for today. For better AI answers, please chat again tomorrow. I can still help with basic tips right now.',
+              suggestions: dedupeSuggestions([
+                'Give me basic saving tips',
+                'Show my goal progress',
+                'How to reduce spending today?',
+                'Remind me to chat tomorrow'
+              ]),
+              category: intent as string,
+            },
+          };
+        }
       } else {
         console.error('AI generation failed, using smart fallback:', error);
       }
@@ -512,12 +642,12 @@ Use this data to personalize your response.` : ''}`;
   }
 
   // Smart fallback — still provides excellent responses
-  const smartResponse = generateSmartResponse(input.userMessage, input.context);
+  const smartResponse = generateSmartResponse(input.userMessage, input.context, input.conversationHistory);
   return {
     success: true,
     data: {
       response: compactResponse(smartResponse.response),
-      suggestions: smartResponse.suggestions,
+      suggestions: dedupeSuggestions(smartResponse.suggestions),
       category: intent as string,
     },
   };
