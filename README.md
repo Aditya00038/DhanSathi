@@ -1,234 +1,217 @@
-# DhanSathi — AI-Powered Financial Management on Algorand
+# DhanSathi
 
-DhanSathi is a personal finance management platform that combines AI-driven insights with on-chain savings discipline. Users connect their Algorand wallet, set savings goals that are enforced by a smart contract, track spending, and get personalised financial advice from a built-in AI advisor — all in one progressive web app.
+AI-powered personal finance and savings discipline platform built with Next.js, Firebase, Gemini, and Algorand smart contracts.
 
----
+## What Is DhanSathi?
 
-## Hackathon Requirements & How We Fulfil Them
+DhanSathi helps users build better money habits by combining:
 
-| Requirement | Status | Details |
-|---|---|---|
-| All smart contracts deployed to Algorand Testnet | ✅ | `SavingsVault` contract — App ID `755771019` |
-| AlgoKit used as primary development framework | ✅ | AlgoKit workspace under `alogkit-contracts/`; built with `algokit project run build` |
-| App ID (Testnet) provided at submission | ✅ | `755771019` — see [Testnet explorer link](#app-id-testnet--testnet-explorer) |
-| Solution interacts with Algorand in a meaningful way | ✅ | Smart contract locks user funds, enforces goal deadlines, and releases them only when goals are met or the deadline passes — not just a payment layer |
+- On-chain savings goals on Algorand (locked, rule-based discipline)
+- Off-chain INR savings goals (flexible deposits and withdrawals)
+- AI financial coaching (Gemini + robust fallback logic)
+- SMS and cash expense tracking with analytics insights
+- UPI/Razorpay flow for adding funds to savings goals
+- Progressive Web App experience for mobile-first usage
 
----
+## Key Features
 
-## Problem Statement
-
-Millions of people, especially in emerging markets, struggle with savings discipline. Traditional banks provide no programmable enforcement, and DeFi tools are too complex. DhanSathi addresses this by:
-
-- Locking savings in an Algorand smart contract so they cannot be withdrawn until a goal is met or a deadline passes.
-- Providing AI-generated financial advice tailored to the user's spending patterns.
-- Supporting multilingual access (Google Translate integration) to reach underserved communities.
-
----
-
-## Live Demo
-
-> **URL:** [https://final-pw-proto.vercel.app](https://final-pw-proto.vercel.app)  
-> *(Connect a Pera Wallet on Testnet to experience the full flow)*
-
----
-
-## LinkedIn Demo Video
-
-> **Video:** [Add your LinkedIn video URL here]
-
----
-
-## App ID (Testnet) & Testnet Explorer
-
-| Detail | Value |
-|---|---|
-| **App ID** | `755771019` |
-| **Network** | Algorand Testnet |
-| **Explorer** | [View on Pera Explorer](https://testnet.explorer.perawallet.app/application/755771019) |
-
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     User (Browser)                      │
-│              Next.js 15 Progressive Web App             │
-└────────────────────────┬────────────────────────────────┘
-                         │  algosdk + @algorandfoundation/algokit-utils
-          ┌──────────────┴───────────────┐
-          │                              │
-          ▼                              ▼
- ┌─────────────────┐           ┌──────────────────┐
- │  Algorand Node  │           │  Firebase / AI   │
- │  (Testnet via   │           │  (Firestore for  │
- │   AlgoNode)     │           │   user data +    │
- │                 │           │   Genkit/Gemini  │
- │  SavingsVault   │           │   AI advisor)    │
- │  App ID:        │           └──────────────────┘
- │  755771019      │
- └─────────────────┘
-
-Smart Contract Interaction Flow
-────────────────────────────────
-1. User connects Pera Wallet (WalletContext)
-2. Frontend calls `create_goal(owner, target, deadline)` → deploys or calls contract
-3. User deposits ALGOs via grouped atomic transaction (app call + payment)
-4. Contract validates sender, deadline, and completion state; updates `total_saved`
-5. When goal is met OR deadline passes, user calls `withdraw()` → inner transaction
-   sends full balance back to owner
-```
-
----
+- Dual goal system:
+   - On-chain Smart Contract Goals in ALGO
+   - Off-chain Savings Goals in INR
+- AI chatbot advisor:
+   - Goal-aware answers using user context
+   - Daily spending checks and progress guidance
+   - Quota-aware messaging when Gemini daily limit is exhausted
+- Expense intelligence:
+   - SMS parsing and categorization
+   - Manual cash entries
+   - Spending insights and trend analytics
+- Government scheme recommendations based on user profile
+- Pera Wallet integration for Algorand Testnet transactions
+- Firebase-backed auth and cloud persistence
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Smart Contract Framework | **AlgoKit** (workspace + deploy) |
-| Smart Contract Language | **Algorand Python (algopy / puyapy)** for the AlgoKit contract; **PyTEAL + Beaker** for the legacy `contracts/app.py` |
-| Blockchain | Algorand Testnet |
-| Frontend | **Next.js 15** (App Router, TypeScript) |
-| Wallet | **Pera Wallet** via `@perawallet/connect` |
-| Blockchain SDK | `algosdk` 2.8, `@algorandfoundation/algokit-utils` |
-| AI / LLM | **Google Genkit + Gemini** (AI financial advisor) |
-| Database | **Firebase Firestore** (user goals, transactions, groups) |
-| Styling | Tailwind CSS, shadcn/ui, Radix UI |
-| Deployment | Vercel |
+- Frontend: Next.js 15, React 19, TypeScript, Tailwind CSS, shadcn/ui, Radix UI
+- AI: Genkit + Google Gemini (`googleai/gemini-2.5-flash`)
+- Backend/API: Next.js Route Handlers
+- Database/Auth/Storage: Firebase (Firestore, Auth, Storage)
+- Blockchain: Algorand Testnet, algosdk, AlgoKit utilities
+- Wallet: Pera Wallet Connect
+- Payments: Razorpay
+- Messaging: Twilio
+- OCR: Tesseract.js (receipt flow)
+- Deployment: Vercel
 
----
+## Architecture Snapshot
 
-## Installation & Setup
+1. Client app (Next.js) handles UI, auth state, and wallet interactions.
+2. Firebase stores user goals, transaction metadata, and app data.
+3. Algorand smart contracts enforce on-chain savings discipline.
+4. AI flow (`src/ai/flows/ai-financial-advisor-flow.ts`) generates personalized guidance.
+5. Route handlers in `src/app/api` provide SMS, receipt, payment, and goal APIs.
 
-### Prerequisites
+## Algorand Details
 
-- Node.js 20+
-- Python 3.12+
-- [AlgoKit CLI](https://github.com/algorandfoundation/algokit-cli#install) (`algokit --version` ≥ 2.0.0)
-- [Poetry](https://python-poetry.org/docs/#installation) (`poetry -V` ≥ 1.2)
-- [Pera Wallet](https://perawallet.app/) browser extension or mobile app (set to **Testnet**)
+- Network: Algorand Testnet
+- Wallet: Pera Wallet
+- Testnet App ID in current setup: `755771019`
+- Explorer: https://testnet.explorer.perawallet.app/application/755771019
 
-### 1. Clone the Repository
+Note: On-chain logic exists in both:
 
-```bash
-git clone https://github.com/AadityaHande/FInal-PW-Proto.git
-cd FInal-PW-Proto
+- AlgoKit workspace: `alogkit-contracts/`
+- Legacy/reference contract flow: `contracts/` and `src/lib/blockchain.ts`
+
+## Project Structure
+
+```text
+.
+|- src/
+|  |- app/                  # Next.js routes/pages and API handlers
+|  |- ai/                   # Genkit setup and AI flows
+|  |- components/           # UI and feature components
+|  |- contexts/             # Auth/Wallet providers
+|  |- hooks/                # Custom hooks
+|  |- lib/                  # Firebase, blockchain, stores, helpers
+|- contracts/               # Legacy smart-contract compile/deploy helpers
+|- alogkit-contracts/       # AlgoKit contract workspace
+|- public/                  # PWA assets and static files
 ```
 
-### 2. Install Frontend Dependencies
+## Local Development
+
+### 1. Prerequisites
+
+- Node.js 20+
+- npm 10+
+- Pera Wallet extension/app (set to Testnet)
+- Optional for contract development:
+   - Python 3.11+
+   - Poetry
+   - AlgoKit CLI
+
+### 2. Clone and Install
 
 ```bash
+git clone https://github.com/Aditya00038/DhanSathi.git
+cd DhanSathi
 npm install
 ```
 
-### 3. Configure Environment Variables
+### 3. Environment Variables
 
-Create a `.env.local` file in the project root:
+Create `.env.local` in the project root.
 
 ```env
-NEXT_PUBLIC_ALGOD_SERVER=https://testnet-api.algonode.cloud
-NEXT_PUBLIC_ALGOD_PORT=443
-NEXT_PUBLIC_ALGOD_TOKEN=
+# App
 NEXT_PUBLIC_APP_ID=755771019
 
-# Firebase config
-NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id
+# Firebase (required)
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_DATABASE_URL=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=
 
-# Genkit / Gemini AI
-GOOGLE_GENAI_API_KEY=your_google_genai_key
+# AI (at least one key recommended)
+GOOGLE_GENAI_API_KEY=
+GEMINI_API_KEY=
+GOOGLE_API_KEY=
+
+# Razorpay (required for payment routes)
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+
+# Twilio (required for SMS routes)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
 ```
 
-### 4. Run the Development Server
+### 4. Run the App
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:9002](http://localhost:9002) in your browser.
+App runs on: `http://localhost:9002`
 
-### 5. (Optional) Build & Deploy the Smart Contract
+## Scripts
 
-```bash
-cd alogkit-contracts/projects/alogkit-contracts
-poetry install
-algokit project run build
-algokit project deploy testnet
-```
+- `npm run dev` - Start local dev server on port 9002
+- `npm run build` - Production build
+- `npm run start` - Start production server
+- `npm run lint` - Run lint checks
+- `npm run typecheck` - TypeScript type checks
+- `npm run genkit:dev` - Run Genkit development flow server
+- `npm run genkit:watch` - Run Genkit in watch mode
+- `npm run compile` - Compile contract artifacts via `contracts/compile.mjs`
 
----
+## API Endpoints
 
-## Usage Guide
+- `POST /api/goal/*` - Goal operations
+- `POST /api/razorpay` - Create Razorpay order
+- `POST /api/send-sms` - Send SMS notifications via Twilio
+- `POST /api/upload-receipt` - Upload receipt image and return base64 payload
 
-### Connect Wallet
-1. Open the app and click **Connect Wallet**.
-2. Select **Pera Wallet** and approve the connection (ensure Testnet is active).
+## AI Assistant Behavior
 
-### Create a Savings Goal
-1. Navigate to **Goals → New Goal**.
-2. Enter a goal name, target amount (in ALGO), and deadline.
-3. Confirm the transaction in Pera Wallet — this calls `create_goal` on the smart contract.
+The chatbot supports:
 
-### Deposit
-1. Open an existing goal and click **Deposit**.
-2. Enter an amount and confirm the grouped atomic transaction (app call + payment).
-3. The contract validates all conditions and updates `total_saved` on-chain.
+- Context-aware financial guidance using goals, spending, and deposits
+- Follow-up understanding for goal-specific questions
+- Smart fallback responses when model is unavailable
+- Quota handling:
+   - If Gemini daily quota is exhausted, users are informed to return tomorrow for best AI quality
 
-### Withdraw
-1. Once the goal is complete or the deadline has passed, click **Withdraw**.
-2. The contract executes an inner transaction to return all funds to your wallet.
+## Smart Contract Flow
 
-### AI Advisor
-- Navigate to **Advisor** for personalised financial tips based on your spending patterns.
+High-level on-chain user flow:
 
-### Analytics & Leaderboard
-- View spending breakdowns in **Analytics** and compare saving streaks in **Leaderboard**.
+1. Connect Pera Wallet
+2. Create an on-chain goal (`create_goal`)
+3. Deposit ALGO (`deposit` with grouped payment + app call)
+4. Withdraw once conditions are met (`withdraw`)
 
----
+Contract interaction code: `src/lib/blockchain.ts`
 
-## Known Limitations
+## Deployment
 
-- Wallet support is currently limited to **Pera Wallet** only (no WalletConnect v2 / other wallets).
-- The legacy `contracts/app.py` (PyTEAL + Beaker) is retained for reference; the production contract uses the AlgoKit workspace.
-- Firebase Firestore rules are in development mode — production deployment requires proper security rules.
-- The AI advisor requires a valid Google Genkit / Gemini API key; without it, the advisor tab will not function.
-- Only **ALGO** is supported as the savings asset; ASA (Algorand Standard Asset) goals are not yet implemented.
-- Mobile PWA install is supported on Android; iOS has limited PWA support.
+### Vercel
 
----
+1. Import the repository in Vercel.
+2. Add all `.env.local` variables in Vercel project settings.
+3. Deploy from `main` branch.
 
-## Team Members & Roles
+### Firebase/Algorand Notes
 
-| Name | Role |
-|---|---|
-| Aaditya Hande | Full-Stack Development, Smart Contract, AlgoKit Integration |
+- Ensure Firestore rules are production-safe before public release.
+- Confirm Algorand Testnet/Mainnet settings before launch.
 
-> *Add additional team members and their roles here.*
+## Current Limitations
 
----
+- Pera Wallet focused flow (limited multi-wallet support)
+- ALGO-centric on-chain path; broader asset support can be added
+- SMS provider behavior may vary by region and sender constraints
+- AI response quality depends on key availability and quota limits
 
-## Repository Structure
+## Contributing
 
-```
-FInal-PW-Proto/
-├── alogkit-contracts/          # AlgoKit smart contract workspace
-│   └── projects/alogkit-contracts/
-│       └── smart_contracts/savings_vault/
-│           ├── contract.py     # ARC-4 SavingsVault (Algorand Python)
-│           └── deploy_config.py
-├── contracts/                  # Legacy PyTEAL + Beaker contract (reference)
-│   └── app.py
-├── src/
-│   ├── app/                    # Next.js App Router pages
-│   ├── components/             # React UI components
-│   ├── contexts/               # WalletContext (Pera Wallet integration)
-│   ├── hooks/                  # Custom React hooks
-│   ├── lib/                    # algosdk helpers, Firebase client
-│   └── ai/                     # Genkit AI flows
-├── public/                     # Static assets
-└── README.md
-```
+1. Fork the repo
+2. Create a feature branch
+3. Commit with clear messages
+4. Open a pull request
+
+## License
+
+Choose and add a license (for example MIT) if you plan public reuse.
+
+## Acknowledgements
+
+- Algorand and AlgoKit ecosystem
+- Firebase and Google Genkit/Gemini
+- Next.js and open-source React tooling community
