@@ -116,6 +116,11 @@ export default function Navbar() {
 
   const handleConnectWallet = async () => {
     try {
+      if (mobileMenuOpen) {
+        setMobileMenuOpen(false);
+        // Allow sheet close animation/unmount so Pera modal remains clickable.
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
       await connectWallet();
       toast({ title: "Wallet Connected!", description: "Your Algorand wallet is now connected." });
     } catch (error) {
@@ -289,10 +294,12 @@ export default function Navbar() {
                         {`${activeAddress.slice(0, 6)}…${activeAddress.slice(-4)}`}
                       </div>
                     ) : (
-                      <Button onClick={handleConnectWallet} disabled={isConnecting} variant="outline" className="w-full h-9 text-sm">
-                        <Wallet className="mr-2 h-4 w-4" />
-                        {isConnecting ? "Connecting…" : "Connect Wallet"}
-                      </Button>
+                      <SheetClose asChild>
+                        <Button onClick={handleConnectWallet} disabled={isConnecting} variant="outline" className="w-full h-9 text-sm">
+                          <Wallet className="mr-2 h-4 w-4" />
+                          {isConnecting ? "Connecting…" : "Connect Wallet"}
+                        </Button>
+                      </SheetClose>
                     )}
                     <SheetClose asChild>
                       <Button onClick={openLogoutDialog} variant="ghost" className="w-full h-9 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10">
