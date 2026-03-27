@@ -167,13 +167,31 @@ export async function depositToGoal(
     signTransactions: (txns: Transaction[]) => Promise<Uint8Array[]>
 ): Promise<string> {
     const suggestedParams = await algodClient.getTransactionParams().do();
+    const amountMicro = Math.round(amount * 1_000_000);
+
+    // Pre-check sender spendable balance to avoid opaque network errors like
+    // "balance below min" after signing in wallet.
+    const accountInfo = await algodClient.accountInformation(senderAddress).do();
+    const currentBalance = Number(accountInfo.amount || 0);
+    const minBalance = Number(accountInfo["min-balance"] || 0);
+    const spendableBalance = Math.max(0, currentBalance - minBalance);
+    const estimatedFees = 2 * algosdk.ALGORAND_MIN_TX_FEE; // payment + app call
+    const requiredMicro = amountMicro + estimatedFees;
+
+    if (spendableBalance < requiredMicro) {
+        const maxDepositMicro = Math.max(0, spendableBalance - estimatedFees);
+        const maxDepositAlgo = maxDepositMicro / 1_000_000;
+        throw new Error(
+            `Insufficient spendable balance. You need at least ${(requiredMicro / 1_000_000).toFixed(6)} ALGO (including network fees), but only ${(spendableBalance / 1_000_000).toFixed(6)} ALGO is spendable. Max deposit right now: ${maxDepositAlgo.toFixed(6)} ALGO.`
+        );
+    }
 
     // ARC-4 §2.3: transaction-type arguments must appear in the group
     // IMMEDIATELY BEFORE the app-call transaction.
     const paymentTxn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
         from: senderAddress,
         to: algosdk.getApplicationAddress(appId),
-        amount: Math.round(amount * 1_000_000), // ALGO → microALGO
+        amount: amountMicro, // ALGO → microALGO
         suggestedParams,
     });
 
@@ -188,11 +206,21 @@ export async function depositToGoal(
     // Group: [payment, appCall] — payment MUST precede the app call.
     algosdk.assignGroupID([paymentTxn, appCallTxn]);
 
-    const signedTxns = await signTransactions([paymentTxn, appCallTxn]);
-    const { txId } = await algodClient.sendRawTransaction(signedTxns).do();
-    await algosdk.waitForConfirmation(algodClient, txId, 4);
+    try {
+        const signedTxns = await signTransactions([paymentTxn, appCallTxn]);
+        const { txId } = await algodClient.sendRawTransaction(signedTxns).do();
+        await algosdk.waitForConfirmation(algodClient, txId, 4);
 
-    return txId;
+        return txId;
+    } catch (error: unknown) {
+        const msg = String((error as any)?.message || error || '');
+        if (/below min|min\s+balance|overspend|insufficient/i.test(msg)) {
+            throw new Error(
+                'Your wallet does not have enough spendable ALGO for this deposit after minimum-balance rules and fees. Try a smaller amount or add more ALGO to the wallet.'
+            );
+        }
+        throw error;
+    }
 }
 
 export async function withdrawFromGoal(
